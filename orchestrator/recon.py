@@ -13,6 +13,8 @@ from tools.crawler import UUID_RE
 CMD_PARAM_HINTS = {"host", "ip", "domain", "cmd", "command", "ping", "dns", "url",
                    "target", "addr", "nslookup", "exec", "run"}
 ID_PARAM_HINTS = {"id", "user", "userid", "user_id", "account", "accountid", "uid", "oid"}
+FILE_PARAM_HINTS = {"file", "filename", "filepath", "path", "doc", "document", "page",
+                    "template", "download", "view", "attachment", "resource", "folder"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -70,6 +72,16 @@ def make_hypotheses(crawl) -> list:
                 hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
                              "class": "CMDI", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may reach an OS command.",
+                             "status": "open"})
+
+    # PATH-TRAVERSAL: params that plausibly reference a file/path.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in FILE_PARAM_HINTS and ("PATH-TRAVERSAL", ep["path"], p) not in seen:
+                seen.add(("PATH-TRAVERSAL", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "PATH-TRAVERSAL", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may reference a file path.",
                              "status": "open"})
 
     for i, h in enumerate(hyps, 1):

