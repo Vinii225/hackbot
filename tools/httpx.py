@@ -83,6 +83,7 @@ class Session:
             status, rbody, rhdrs = resp.status, resp.read().decode("utf-8", "replace"), dict(resp.headers)
         except urllib.error.HTTPError as e:
             status, rbody, rhdrs = e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
+            e.close()
         elapsed = time.time() - t0
         self.request_count += 1
         return Response(req_record, status, rhdrs, rbody, elapsed)
