@@ -140,6 +140,30 @@ vulns against the local fixture without being handed any endpoint.
 - `tools/state.py` — stdlib-only helper: show/set state, bump counters, enforce limits,
   and record/query the tested ledger for dedupe.
 
+## Optional LLM triage layer (bring your own backend)
+
+The deterministic engine runs with no LLM. Triage is an *optional* decision layer that
+reads what the engine already produced and helps prioritize hypotheses and explain
+findings — a couple of small calls per scan, so it is cheap on any backend. If no backend
+is available, or a call fails, the pipeline runs unchanged.
+
+Pick a backend with `--triage` (or `HACKBOT_LLM`), default `none`:
+
+```
+python -m orchestrator targets/x --executor sim --sim examples/scenario.json --triage auto
+```
+
+| `--triage` | Backend | Notes |
+|------------|---------|-------|
+| `claude`   | `claude -p` CLI | uses your existing Claude subscription; override `HACKBOT_CLAUDE_CMD` |
+| `ollama`   | `http://localhost:11434` | free & local; `ollama serve` + `ollama pull <model>`; set `HACKBOT_OLLAMA_MODEL` |
+| `openai`   | any OpenAI-compatible API | set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, model via `HACKBOT_OPENAI_MODEL` — covers OpenAI, Groq, OpenRouter, LM Studio, … |
+| `auto`     | first available | tries claude → ollama → openai |
+| `none`     | disabled (default) | deterministic only, zero cost |
+
+See `orchestrator/triage.py`. The LLM is a decision layer only — it never sends requests
+to the target.
+
 ## Roadmap (future skills, not in MVP)
 
 XSS · SSRF · SQL Injection · JWT · CORS · SSTI · GraphQL · XXE · CSRF — each added as a new
