@@ -124,6 +124,16 @@ proving the dynamic pipeline, not just the loop machinery.
 
 For a real PortSwigger lab, see `targets/portswigger-idor/RUNBOOK.md`.
 
+### Autonomous recon
+
+`orchestrator/http_exec.py:DynamicExecutors` is the point-and-go set: given only a base
+URL (and optional credentials), recon uses the bounded, in-scope crawler
+(`tools/crawler.py`) to discover endpoints, params, forms, same-origin JS and object ids,
+then `orchestrator/recon.py` turns those into hypotheses (numeric/UUID object id -> IDOR;
+command-ish param name -> CMDI). Hunt dispatches each hypothesis to `confirm_idor` /
+`confirm_cmdi`. `tests/test_recon.py` proves it discovers the surface and confirms both
+vulns against the local fixture without being handed any endpoint.
+
 ## Tools
 
 - `tools/http.sh` — curl wrapper that saves raw request/response + timing as evidence.
