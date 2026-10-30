@@ -36,11 +36,34 @@ def claude_invoke(prompt: str) -> str:
     return out.stdout.strip()
 
 
+def _ollama_base():
+    # Default to 127.0.0.1 (IPv4): 'localhost' may resolve to ::1, where urllib does not
+    # fall back to IPv4 and Ollama (bound to 127.0.0.1) would be unreachable.
+    return _env("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+
+
+def _ollama_model(base):
+    # Explicit choice wins; otherwise use whatever model is actually installed, so this
+    # works regardless of which model the user pulled (avoids a 'model not found' 404).
+    chosen = _env("HACKBOT_OLLAMA_MODEL")
+    if chosen:
+        return chosen
+    try:
+        with urllib.request.urlopen(base + "/api/tags", timeout=5) as r:
+            models = json.loads(r.read()).get("models", [])
+        if models:
+            return models[0]["name"]
+    except Exception:  # noqa: BLE001
+        pass
+    return "llama3.2"
+
+
 def ollama_invoke(prompt: str) -> str:
-    model = _env("HACKBOT_OLLAMA_MODEL", "llama3.2")
-    url = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/") + "/api/generate"
+    base = _ollama_base()
     req = urllib.request.Request(
-        url, data=json.dumps({"model": model, "prompt": prompt, "stream": False}).encode(),
+        base + "/api/generate",
+        data=json.dumps({"model": _ollama_model(base), "prompt": prompt,
+                         "stream": False}).encode(),
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read()).get("response", "").strip()
