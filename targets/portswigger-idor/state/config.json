@@ -1,0 +1,7 @@
+{
+  "target": "portswigger-idor",
+  "limits": { "max_iterations": 15, "max_requests": 120, "max_runtime_seconds": 900 },
+  "allowed_agents": ["recon", "vuln-hunter", "reporter"],
+  "allowed_skills": ["recon", "idor"],
+  "focus": ["idor"]
+}

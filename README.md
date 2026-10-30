@@ -113,6 +113,17 @@ Run the tests (stdlib only):
 python -m unittest discover -s tests -v
 ```
 
+### Dynamic executor + end-to-end proof
+
+`orchestrator/http_exec.py:HttpIdorExecutors` is a deterministic (no-LLM) implementation
+of the `idor.md` procedure over real HTTP, using the session/evidence client in
+`tools/httpx.py`. `tests/test_e2e_idor.py` boots an intentionally-vulnerable local
+fixture (`tests/fixtures/mock_lab.py`), runs the full loop against it, and asserts the
+IDOR is confirmed from real captured request/response evidence and a report is written —
+proving the dynamic pipeline, not just the loop machinery.
+
+For a real PortSwigger lab, see `targets/portswigger-idor/RUNBOOK.md`.
+
 ## Tools
 
 - `tools/http.sh` — curl wrapper that saves raw request/response + timing as evidence.
