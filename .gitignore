@@ -1,0 +1,31 @@
+# Engagement runtime artifacts — keep the harness, not live run data/evidence.
+# Comment these out if you WANT to version a specific engagement's results.
+
+# Captured evidence (may contain session tokens / target data)
+targets/*/findings/evidence/
+
+# Live run outputs (regenerated each run). The example target's skeleton is tracked
+# via its .gitkeep files; actual results are not.
+targets/*/findings/*.json
+targets/*/reports/*.md
+targets/*/recon/*.json
+targets/*/recon/raw/
+
+# Local state that changes every run
+targets/*/state/state.json
+targets/*/state/tested.json
+
+# Keep directory skeletons and the example target's seed files (so the project is
+# fully inspectable). Live runs against OTHER targets stay ignored by the rules above.
+!targets/*/**/.gitkeep
+!targets/target-example/scope.md
+!targets/target-example/state/config.json
+!targets/target-example/state/plan.md
+!targets/target-example/state/state.json
+!targets/target-example/state/tested.json
+
+# OS / editor noise
+.DS_Store
+*.swp
+__pycache__/
+*.pyc
