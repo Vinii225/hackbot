@@ -18,6 +18,7 @@ whoami, id) so injection is observable deterministically without any real execut
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 import threading
 import time
@@ -37,10 +38,19 @@ SLEEP_CAP = 3.0  # keep the fixture responsive even if a huge sleep is injected
 INDEX_HTML = """<!doctype html><html><body>
 <h1>Account</h1>
 <a href="/api/user/{id}">My account (API)</a>
+<a href="/download?file=welcome.txt">Download welcome</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
 <script src="/static/app.js"></script>
 </body></html>"""
+
+# Emulated virtual filesystem for the path-traversal scenario (no real files touched).
+BASE_DIR = "/var/www/files"
+VFS = {
+    "/var/www/files/welcome.txt": "Welcome to the lab.\n",
+    "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nlabuser:x:1000:1000::/home/labuser:/bin/sh\n",
+    "/app/secret.txt": "FLAG{path-traversal}\n",
+}
 LOGIN_HTML = """<!doctype html><html><body><form action="/login" method="POST">
 <input name="username"><input name="password"><button>Login</button></form></body></html>"""
 APP_JS = """// account widget
@@ -160,6 +170,24 @@ class _Handler(BaseHTTPRequestHandler):
             if uid != USERS[who]["id"]:
                 return self._send(403, {"error": "forbidden"})   # SAFE: ownership enforced
             return self._send(200, _acct_view(BY_ID[uid]))
+
+        if path == "/download":
+            name = self._query().get("file", "")
+            # VULN: input joined to the base dir and resolved without containment check,
+            # so `../` escapes BASE_DIR and reaches any file in the virtual filesystem.
+            resolved = posixpath.normpath(BASE_DIR + "/" + name)
+            if resolved in VFS:
+                return self._send_raw(200, VFS[resolved], "text/plain")
+            return self._send(404, {"error": "file not found"})
+
+        if path == "/safe-download":
+            name = self._query().get("file", "")
+            resolved = posixpath.normpath(BASE_DIR + "/" + name)
+            if not (resolved == BASE_DIR or resolved.startswith(BASE_DIR + "/")):
+                return self._send(403, {"error": "forbidden"})   # SAFE: containment enforced
+            if resolved in VFS:
+                return self._send_raw(200, VFS[resolved], "text/plain")
+            return self._send(404, {"error": "file not found"})
 
         if path == "/ping":
             host = self._query().get("host", "")
