@@ -109,6 +109,8 @@ class SimulationExecutors:
                 f"- Evidence: {f.get('evidence', {}).get('dir')} "
                 f"({', '.join(f.get('evidence', {}).get('files', [])) or 'none'})",
             ]
+            if f.get("explanation"):
+                lines.append(f"- Impact & remediation: {f['explanation']}")
         report_file = store.dir / "reports" / "REPORT.md"
         report_file.parent.mkdir(parents=True, exist_ok=True)
         report_file.write_text("\n".join(lines) + "\n")

@@ -199,9 +199,12 @@ def _prioritize(store, hyps):
     focus = [f.lower() for f in store.config.get("focus", [])]
 
     def key(h):
+        # A triage-assigned priority (if present) wins over the default heuristic.
+        if isinstance(h.get("priority"), int):
+            return (0, h["priority"], 0)
         cls = str(h.get("class", h.get("hypothesis", ""))).lower()
         fidx = focus.index(cls) if cls in focus else len(focus)
-        return (fidx, CONFIDENCE_RANK.get(str(h.get("confidence", "low")).lower(), 3))
+        return (1, fidx, CONFIDENCE_RANK.get(str(h.get("confidence", "low")).lower(), 3))
 
     return sorted(hyps, key=key)
 

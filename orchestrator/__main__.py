@@ -52,6 +52,10 @@ def main(argv=None):
                     help="scenario file for the sim executor (required when --executor sim)")
     ap.add_argument("--print-prompts", action="store_true",
                     help="print the llm prompts for this target and exit (no model call)")
+    ap.add_argument("--triage", choices=["none", "auto", "claude", "ollama", "openai"],
+                    default="none",
+                    help="optional LLM triage layer (prioritize + explain). Default none "
+                         "(deterministic only). 'auto' picks whatever is available.")
     args = ap.parse_args(argv)
 
     if args.print_prompts:
@@ -65,6 +69,16 @@ def main(argv=None):
     else:
         from .llm import LLMExecutors
         executors = LLMExecutors()
+
+    if args.triage != "none":
+        from .triage import TriageLayer, TriagedExecutors
+        triage = TriageLayer.from_choice(args.triage)
+        if triage.available():
+            print(f"[triage] backend: {triage.name}", file=sys.stderr)
+            executors = TriagedExecutors(executors, triage)
+        else:
+            print(f"[triage] no backend available for '{args.triage}'; "
+                  "running deterministic only", file=sys.stderr)
 
     approver = _approver if args.mode == "coop" else None
     summary = run_engagement(args.target_dir, executors, mode=args.mode,
