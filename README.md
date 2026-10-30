@@ -4,7 +4,7 @@ An AI-orchestrated harness for **authorized** web application security testing, 
 Coordinator pattern. Designed for PortSwigger Web Security Academy labs and other targets
 you are explicitly authorized to test.
 
-> ⚠️ **Authorized use only.** Every run is bounded by `targets/<target>/scope.md`. The
+> **Authorized use only.** Every run is bounded by `targets/<target>/scope.md`. The
 > system never expands scope on its own. See [`CLAUDE.md`](CLAUDE.md).
 
 ## MVP focus
@@ -75,6 +75,32 @@ Nothing important lives only in chat. Each engagement persists under
 
 The agent prompts are plain Markdown, so the same workflow can be driven by any agent
 runner that can read files and run `curl` — not just Claude Code.
+
+## Programmatic runner (code-driven loop)
+
+`orchestrator/` is a real Python implementation of the Coordinator loop. The loop,
+state, limit enforcement and termination are actual code (not model instructions);
+the recon/exploitation work is delegated to a pluggable `Executors` object.
+
+```
+python -m orchestrator targets/target-example --sim examples/scenario.json --mode auto
+```
+
+- `--sim <scenario.json>` runs fully offline with `SimulationExecutors` (deterministic,
+  no network) — used by the test suite and for demos.
+- Real LLM+curl execution plugs into `orchestrator/agents.py:LLMExecutors` (left as a
+  documented stub in the MVP).
+
+Loop safety: the loop stops on any of `max_iterations`, `max_requests`,
+`max_runtime_seconds`, a no-progress guard, missing/ambiguous scope, operator stop,
+or objective-complete. A `confirmed` finding whose evidence files are missing on disk is
+automatically downgraded to `unconfirmed`.
+
+Run the tests (stdlib only):
+
+```
+python -m unittest discover -s tests -v
+```
 
 ## Tools
 
