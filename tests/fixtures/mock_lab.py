@@ -33,6 +33,21 @@ USERS = {
 BY_ID = {u["id"]: dict(username=name, **u) for name, u in USERS.items()}
 SLEEP_CAP = 3.0  # keep the fixture responsive even if a huge sleep is injected
 
+# HTML/JS so a crawler can DISCOVER the surface the way it would on a real app.
+INDEX_HTML = """<!doctype html><html><body>
+<h1>Account</h1>
+<a href="/api/user/{id}">My account (API)</a>
+<form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
+<form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
+<script src="/static/app.js"></script>
+</body></html>"""
+LOGIN_HTML = """<!doctype html><html><body><form action="/login" method="POST">
+<input name="username"><input name="password"><button>Login</button></form></body></html>"""
+APP_JS = """// account widget
+fetch('/me').then(r=>r.json()).then(u=>{ fetch('/api/user/'+u.id); });
+function ping(h){ return fetch('/ping?host='+encodeURIComponent(h)); }
+"""
+
 
 def _fake_shell(cmd: str) -> str:
     """Emulate a POSIX-ish shell for a small safe builtin set. Never executes anything."""
@@ -91,6 +106,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_raw(self, status, text, ctype):
+        body = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         form = {k: v[0] for k, v in
@@ -109,6 +132,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         who = self._session_user()
+
+        if path == "/":
+            html = INDEX_HTML.format(id=USERS[who]["id"]) if who else LOGIN_HTML
+            return self._send_raw(200, html, "text/html")
+        if path == "/static/app.js":
+            return self._send_raw(200, APP_JS, "application/javascript")
 
         if path == "/me":
             if not who:
