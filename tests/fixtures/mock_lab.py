@@ -1,16 +1,27 @@
-"""Intentionally-vulnerable LOCAL test fixture: a tiny app with a classic IDOR.
+"""Intentionally-vulnerable LOCAL test fixture for validating the hackbot end-to-end.
 
-This exists ONLY to validate the hackbot's dynamic pipeline end-to-end on localhost,
-the same role DVWA / WebGoat / PortSwigger labs play. It binds to 127.0.0.1 on an
-ephemeral port, holds no real data, and is never deployed anywhere.
+Binds to 127.0.0.1 on an ephemeral port, holds no real data, is never deployed. Same
+role DVWA / WebGoat / PortSwigger labs play.
 
-The vuln: GET /api/user/<id> returns that account (including its apiKey) based only on
-the <id> in the URL, without checking that the logged-in session owns that id.
+Scenarios:
+  GET  /me                      current session's user (for recon)
+  GET  /api/user/<id>           IDOR: returns any account by id, no ownership check  (VULN)
+  GET  /api/safe-user/<id>      access-controlled: 403 unless you own <id>           (SAFE)
+  GET  /ping?host=              reflected OS command injection, output returned       (VULN)
+  GET  /ping-blind?host=        blind command injection: executes, no output         (VULN)
+  POST /feedback  message=      echoes input as data, never shells out               (SAFE)
+
+The "shell" is EMULATED (_fake_shell): it never spawns a real process or shell. It honors
+command separators / substitutions and a tiny safe builtin set (echo, sleep, nslookup,
+whoami, id) so injection is observable deterministically without any real execution.
 """
 from __future__ import annotations
 
 import json
+import re
 import threading
+import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 USERS = {
@@ -20,18 +31,56 @@ USERS = {
                "apiKey": "APIKEY-CARLOS-0002"},
 }
 BY_ID = {u["id"]: dict(username=name, **u) for name, u in USERS.items()}
+SLEEP_CAP = 3.0  # keep the fixture responsive even if a huge sleep is injected
+
+
+def _fake_shell(cmd: str) -> str:
+    """Emulate a POSIX-ish shell for a small safe builtin set. Never executes anything."""
+    def run_one(c: str) -> str:
+        c = c.strip()
+        if not c:
+            return ""
+        parts = c.split()
+        prog, args = parts[0], parts[1:]
+        if prog == "echo":
+            return " ".join(args)
+        if prog == "sleep":
+            try:
+                time.sleep(min(float(args[0]), SLEEP_CAP))
+            except (ValueError, IndexError):
+                pass
+            return ""
+        if prog in ("nslookup", "ping", "host", "dig"):
+            return "Server: fake-dns\nAddress: 127.0.0.1"   # note: does NOT echo the arg
+        if prog == "whoami":
+            return "labuser"
+        if prog == "id":
+            return "uid=1000(labuser) gid=1000(labuser)"
+        return ""  # unknown command: nothing on stdout
+
+    def expand(s: str) -> str:
+        s = re.sub(r"\$\(([^)]*)\)", lambda m: run_one(m.group(1)), s)
+        s = re.sub(r"`([^`]*)`", lambda m: run_one(m.group(1)), s)
+        return s
+
+    cmd = expand(cmd)
+    out = [run_one(seg) for seg in re.split(r"\s*(?:&&|\|\||[;|&\n])\s*", cmd)]
+    return "\n".join(o for o in out if o)
 
 
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
-        pass  # keep test output quiet
+        pass
 
     def _session_user(self):
-        cookie = self.headers.get("Cookie", "")
-        for part in cookie.split(";"):
+        for part in self.headers.get("Cookie", "").split(";"):
             if part.strip().startswith("session="):
                 return part.strip().split("=", 1)[1]
         return None
+
+    def _query(self):
+        q = urllib.parse.urlparse(self.path).query
+        return {k: v[0] for k, v in urllib.parse.parse_qs(q).items()}
 
     def _send(self, status, obj, set_cookie=None):
         body = json.dumps(obj).encode()
@@ -43,36 +92,69 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        form = {k: v[0] for k, v in
+                urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
         if self.path == "/login":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length).decode()
-            form = {k: v[0] for k, v in __import__("urllib.parse", fromlist=["parse_qs"]).parse_qs(raw).items()}
             u = USERS.get(form.get("username", ""))
             if u and u["password"] == form.get("password"):
-                return self._send(200, {"login": "ok", "id": u["id"]}, set_cookie=form["username"])
+                return self._send(200, {"login": "ok", "id": u["id"]},
+                                  set_cookie=form["username"])
             return self._send(401, {"error": "invalid credentials"})
+        if self.path == "/feedback":
+            # SAFE: input is treated as data and echoed back; never shelled out.
+            return self._send(200, {"received": form.get("message", "")})
         self._send(404, {"error": "not found"})
 
     def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
         who = self._session_user()
-        if self.path == "/me":
+
+        if path == "/me":
             if not who:
                 return self._send(401, {"error": "not logged in"})
             return self._send(200, {"username": who, "id": USERS[who]["id"]})
-        if self.path.startswith("/api/user/"):
+
+        if path.startswith("/api/user/"):
             if not who:
                 return self._send(401, {"error": "not logged in"})
-            try:
-                uid = int(self.path.rsplit("/", 1)[1])
-            except ValueError:
-                return self._send(400, {"error": "bad id"})
-            acct = BY_ID.get(uid)
+            acct = BY_ID.get(_safe_int(path.rsplit("/", 1)[1]))
             if not acct:
                 return self._send(404, {"error": "no such user"})
-            # VULNERABILITY: no check that `who` owns `uid`.
-            return self._send(200, {"id": acct["id"], "username": acct["username"],
-                                    "email": acct["email"], "apiKey": acct["apiKey"]})
+            # VULN: no check that `who` owns this id.
+            return self._send(200, _acct_view(acct))
+
+        if path.startswith("/api/safe-user/"):
+            if not who:
+                return self._send(401, {"error": "not logged in"})
+            uid = _safe_int(path.rsplit("/", 1)[1])
+            if uid != USERS[who]["id"]:
+                return self._send(403, {"error": "forbidden"})   # SAFE: ownership enforced
+            return self._send(200, _acct_view(BY_ID[uid]))
+
+        if path == "/ping":
+            host = self._query().get("host", "")
+            # VULN: user input concatenated into a command; output reflected.
+            return self._send(200, {"output": _fake_shell("nslookup " + host)})
+
+        if path == "/ping-blind":
+            host = self._query().get("host", "")
+            _fake_shell("nslookup " + host)  # VULN: executes, but output not returned
+            return self._send(200, {"status": "checked"})
+
         self._send(404, {"error": "not found"})
+
+
+def _safe_int(s):
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _acct_view(acct):
+    return {"id": acct["id"], "username": acct["username"],
+            "email": acct["email"], "apiKey": acct["apiKey"]}
 
 
 def start_mock_lab():
@@ -80,13 +162,12 @@ def start_mock_lab():
     httpd = HTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    port = httpd.server_address[1]
-    return httpd, thread, f"http://127.0.0.1:{port}"
+    return httpd, thread, f"http://127.0.0.1:{httpd.server_address[1]}"
 
 
 if __name__ == "__main__":
     httpd, _, base = start_mock_lab()
-    print(f"mock IDOR lab running at {base} (Ctrl-C to stop)")
+    print(f"mock lab running at {base} (Ctrl-C to stop)")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
