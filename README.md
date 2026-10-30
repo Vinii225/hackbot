@@ -83,13 +83,24 @@ state, limit enforcement and termination are actual code (not model instructions
 the recon/exploitation work is delegated to a pluggable `Executors` object.
 
 ```
-python -m orchestrator targets/target-example --sim examples/scenario.json --mode auto
+# Offline, deterministic (no network, no model) — used by the tests and for demos:
+python -m orchestrator targets/target-example --executor sim --sim examples/scenario.json
+
+# Real run: drive the Markdown agents via an LLM coding agent (hits the target):
+python -m orchestrator targets/target-example --executor llm --mode coop
+
+# Inspect the prompts the llm executor would send, without calling any model:
+python -m orchestrator targets/target-example --print-prompts
 ```
 
-- `--sim <scenario.json>` runs fully offline with `SimulationExecutors` (deterministic,
-  no network) — used by the test suite and for demos.
-- Real LLM+curl execution plugs into `orchestrator/agents.py:LLMExecutors` (left as a
-  documented stub in the MVP).
+- `--executor sim` with `--sim <scenario.json>` replays a scenario with
+  `SimulationExecutors` (`orchestrator/agents.py`) — fully offline and deterministic.
+- `--executor llm` uses `orchestrator/llm.py:LLMExecutors`, which builds a prompt per
+  phase (`orchestrator/prompts.py`) and invokes a coding agent — the Claude Code CLI by
+  default (`claude -p`; override with env `HACKBOT_LLM_CMD`). The agent follows the
+  `AGENT.md` / skill / contract files and writes the same on-disk artifacts, so the loop
+  and all its limits apply unchanged. The `invoke` callable is injectable, so the whole
+  pipeline is testable with a fake model offline.
 
 Loop safety: the loop stops on any of `max_iterations`, `max_requests`,
 `max_runtime_seconds`, a no-progress guard, missing/ambiguous scope, operator stop,
