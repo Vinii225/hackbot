@@ -6,7 +6,7 @@
     "max_runtime_seconds": 1800
   },
   "allowed_agents": ["recon", "vuln-hunter", "reporter"],
-  "allowed_skills": ["recon", "idor", "cmdi"],
+  "allowed_skills": ["recon", "idor", "cmdi", "path-traversal"],
   "allowed_tools": ["curl", "tools/http.sh", "tools/state.py"],
-  "focus": ["idor", "cmdi"]
+  "focus": ["idor", "cmdi", "path-traversal"]
 }
