@@ -1,14 +1,14 @@
 """CLI for the programmatic orchestrator.
 
 Examples:
-  # Offline deterministic run against a scenario (safe; no network):
-  python -m orchestrator targets/target-example --sim examples/scenario.json
+  # Offline deterministic run against a scenario (safe; no network, no model):
+  python -m orchestrator targets/target-example --executor sim --sim examples/scenario.json
 
-  # Human-in-the-loop (pauses each phase for approval):
-  python -m orchestrator targets/target-example --sim examples/scenario.json --mode coop
+  # Real run: drive the Markdown agents via the Claude CLI (makes requests to the target!):
+  python -m orchestrator targets/target-example --executor llm --mode coop
 
-Real (LLM + curl) runs are not wired in the MVP: use the Markdown agents via
-/hackbot-coop and /hackbot-auto, or implement orchestrator.agents.LLMExecutors.
+  # Inspect the prompts the llm executor would send, without invoking any model:
+  python -m orchestrator targets/target-example --print-prompts
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ import json
 import sys
 from pathlib import Path
 
-from .agents import LLMExecutors, SimulationExecutors
-from .core import run_engagement
+from .agents import SimulationExecutors
+from .core import StateStore, load_scope, run_engagement
 
 
 def _approver(phase, payload, store):
@@ -30,22 +30,40 @@ def _approver(phase, payload, store):
     return ans in ("y", "yes")
 
 
+def _print_prompts(target_dir):
+    from . import prompts
+    store = StateStore(target_dir).load()
+    ok, reason, urls = load_scope(target_dir)
+    urls = urls or ["https://IN-SCOPE-HOST.example"]
+    print("# RECON PROMPT\n" + prompts.build_recon_prompt(target_dir, urls, "demo objective"))
+    hyps = store.hypotheses() or [{"id": "H-001", "endpoint": "/api/user/{id}",
+                                   "method": "GET", "parameter": "id", "class": "IDOR"}]
+    print("\n\n# HUNT PROMPT\n" + prompts.build_hunt_prompt(target_dir, hyps[0], urls, "idor"))
+    print("\n\n# REPORT PROMPT\n" + prompts.build_report_prompt(target_dir, []))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="orchestrator", description="Hackbot Coordinator loop")
     ap.add_argument("target_dir", help="path to a target dir, e.g. targets/target-example")
     ap.add_argument("--mode", choices=["auto", "coop"], default="auto")
     ap.add_argument("--objective", default="Find IDOR and command injection")
+    ap.add_argument("--executor", choices=["sim", "llm"], default="sim")
     ap.add_argument("--sim", metavar="SCENARIO.json",
-                    help="run offline with SimulationExecutors from this scenario file")
+                    help="scenario file for the sim executor (required when --executor sim)")
+    ap.add_argument("--print-prompts", action="store_true",
+                    help="print the llm prompts for this target and exit (no model call)")
     args = ap.parse_args(argv)
 
-    if args.sim:
-        scenario = json.loads(Path(args.sim).read_text())
-        executors = SimulationExecutors(scenario)
+    if args.print_prompts:
+        _print_prompts(args.target_dir)
+        return 0
+
+    if args.executor == "sim":
+        if not args.sim:
+            ap.error("--executor sim requires --sim SCENARIO.json")
+        executors = SimulationExecutors(json.loads(Path(args.sim).read_text()))
     else:
-        print("No --sim scenario given. Real LLM executors are not wired in the MVP.\n"
-              "Run the Markdown-driven workflow (/hackbot-coop, /hackbot-auto) or pass "
-              "--sim <scenario.json> for an offline run.", file=sys.stderr)
+        from .llm import LLMExecutors
         executors = LLMExecutors()
 
     approver = _approver if args.mode == "coop" else None

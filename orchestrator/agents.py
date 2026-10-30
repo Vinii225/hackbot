@@ -4,11 +4,11 @@ The loop calls executors.recon(...), executors.hunt(...), executors.report(...).
 Each writes the same on-disk artifacts the Markdown agents would, following the
 contracts in contracts/.
 
-Two implementations:
-  - SimulationExecutors: deterministic, offline, driven by a scenario dict. Used by the
-    test suite and for dry demos. Touches no network.
-  - LLMExecutors: the real seam (stub). Wire this to an LLM following the AGENT.md files
-    plus curl / tools/http.sh. Left unimplemented on purpose for the MVP.
+Implementations:
+  - SimulationExecutors (here): deterministic, offline, driven by a scenario dict. Used
+    by the test suite and for demos. Touches no network.
+  - LLMExecutors (orchestrator/llm.py): real work via an LLM coding agent following the
+    AGENT.md files plus curl / tools/http.sh.
 """
 from __future__ import annotations
 
@@ -113,26 +113,3 @@ class SimulationExecutors:
         report_file.parent.mkdir(parents=True, exist_ok=True)
         report_file.write_text("\n".join(lines) + "\n")
         return {"report_file": str(report_file), "confirmed": len(confirmed)}
-
-
-class LLMExecutors:
-    """Real seam. Wire each method to an LLM following the matching AGENT.md plus
-    curl / tools/http.sh, then have it write the contract artifacts to disk.
-    Intentionally not implemented in the MVP."""
-
-    def recon(self, store, urls, objective):
-        raise NotImplementedError(
-            "LLMExecutors.recon: drive agents/recon/AGENT.md + skills/recon.md, then "
-            "write recon/*.json. Use SimulationExecutors for offline runs."
-        )
-
-    def hunt(self, store, hyp, urls):
-        raise NotImplementedError(
-            "LLMExecutors.hunt: drive agents/vuln-hunter with the matching skill, capture "
-            "evidence via tools/http.sh, then write findings/F-*.json."
-        )
-
-    def report(self, store):
-        raise NotImplementedError(
-            "LLMExecutors.report: drive agents/reporter/AGENT.md over confirmed findings."
-        )
