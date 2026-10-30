@@ -1,0 +1,12 @@
+{
+  "target": "target-example",
+  "mode": "coop",
+  "status": "idle",
+  "current_phase": "none",
+  "iteration": 0,
+  "requests_used": 0,
+  "started_at": null,
+  "updated_at": null,
+  "next_action": null,
+  "termination_reason": null
+}
