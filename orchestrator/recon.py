@@ -12,6 +12,8 @@ FILE_PARAM_HINTS = {"file", "filename", "filepath", "path", "doc", "document", "
                     "template", "download", "view", "attachment", "resource", "folder"}
 XSS_PARAM_HINTS = {"q", "query", "search", "s", "term", "keyword", "name", "message",
                    "comment", "title", "text", "input", "content"}
+ADMIN_PATH_HINTS = ("admin", "administrator", "manage", "management", "dashboard",
+                    "console", "internal", "staff", "moderator", "superuser")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -90,6 +92,21 @@ def make_hypotheses(crawl) -> list:
                              "class": "XSS", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may be reflected into output.",
                              "status": "open"})
+
+    # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
+    # that should test anonymous access.
+    hidden = getattr(crawl, "hidden_paths", set())
+    for ep in endpoints:
+        path = ep["path"]
+        if (path in hidden or any(k in path.lower() for k in ADMIN_PATH_HINTS)) \
+                and ("ACCESS-CONTROL", path) not in seen:
+            seen.add(("ACCESS-CONTROL", path))
+            why = "disclosed by robots.txt" if path in hidden else "admin-like path"
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "ACCESS-CONTROL", "confidence": "medium",
+                         "reason": f"{path} looks like privileged functionality ({why}); "
+                                   "test for access without authentication.",
+                         "status": "open"})
 
     for i, h in enumerate(hyps, 1):
         h["id"] = f"H-{i:03d}"

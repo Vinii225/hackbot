@@ -181,3 +181,25 @@ def check_xss(session, hyp, ev_dir, ctx):
                            false_positive_reason="reflected value is HTML-encoded or "
                                                  "non-HTML (not executable)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_LOGIN_MARKERS = ('type="password"', "type=password", 'name="password"', 'action="/login"')
+
+
+@register("ACCESS-CONTROL", "ACCESS_CONTROL")
+def check_unauth_access(session, hyp, ev_dir, ctx):
+    endpoint = hyp["endpoint"]
+    anon = Session(session.base, timeout=session.timeout)
+    resp = anon.get(endpoint)
+    files = save_evidence(ev_dir, "anonymous", resp)
+    body = resp.body or ""
+
+    if resp.status in (401, 403) or any(m in body for m in _LOGIN_MARKERS):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"anonymous request was rejected or sent "
+                                                 f"to login (status {resp.status})")
+    if resp.status == 200 and body.strip():
+        return CheckResult("confirmed", endpoint, "high", f"GET {endpoint} with no session",
+                           "Privileged endpoint served content to an unauthenticated request "
+                           "(no login or authorization enforced).", files=files)
+    return CheckResult("unconfirmed", endpoint, files=files)

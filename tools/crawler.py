@@ -24,6 +24,7 @@ class CrawlResult:
         self.object_ids = set()  # ints and uuid strings seen in paths / JSON
         self.js_files = set()
         self.js_endpoints = set()
+        self.hidden_paths = set()  # paths disclosed by robots.txt (linked nowhere)
 
     def add_endpoint(self, url, method="GET", params=None):
         path = urlsplit(url).path or "/"
@@ -61,12 +62,14 @@ class CrawlResult:
                 "js_files": sorted(self.js_files)}
 
 
-def _enqueue(url, allowed, res, queue, seen):
+def _enqueue(url, allowed, res, queue, seen, hidden=False):
     url = urldefrag(url)[0]
     if urlsplit(url).netloc not in allowed or "*" in url:
         return
     res.add_endpoint(url, "GET")
     res.collect_ids_from_path(url)
+    if hidden:
+        res.hidden_paths.add(urlsplit(url).path)
     if url not in seen:
         queue.append((url, 1))
 
@@ -83,7 +86,7 @@ def _seed_wellknown(base_urls, session, allowed, res, queue, seen, max_requests)
         if robots.status != 200:
             continue
         for path in ROBOTS_PATH_RE.findall(robots.body or ""):
-            _enqueue(urljoin(root + "/", path), allowed, res, queue, seen)
+            _enqueue(urljoin(root + "/", path), allowed, res, queue, seen, hidden=True)
         sitemaps.update(ROBOTS_SITEMAP_RE.findall(robots.body or ""))
     for sm in sitemaps:
         if session.request_count >= max_requests or urlsplit(sm).netloc not in allowed:

@@ -13,6 +13,7 @@ Scenarios:
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
+  GET  /admin-secure            admin endpoint, 401 unless authenticated              (SAFE)
 
 The "shell" is EMULATED (_fake_shell): it never spawns a real process or shell. It honors
 command separators / substitutions and a tiny safe builtin set (echo, sleep, nslookup,
@@ -168,6 +169,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/sitemap-only-page":
             return self._send_raw(200, "<!doctype html><html><body>hidden</body></html>",
                                   "text/html")
+        if path == "/admin-secure":
+            if not who:
+                return self._send(401, {"error": "login required"})  # SAFE: auth enforced
+            return self._send(200, {"panel": "admin"})
 
         if path == "/me":
             if not who:
