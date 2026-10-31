@@ -157,3 +157,27 @@ def check_path_traversal(session, hyp, ev_dir, ctx, benign="welcome.txt"):
                            false_positive_reason=f"traversal rejected/sanitized "
                                                  f"(statuses {statuses})")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("XSS")
+def check_xss(session, hyp, ev_dir, ctx):
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    token = "HB" + secrets.token_hex(4)
+    marker = f"<{token}>"
+
+    control = send(token)
+    inject = send(marker)
+    files = save_evidence(ev_dir, "control-plain", control)
+    files += save_evidence(ev_dir, "inject-xss", inject)
+
+    is_html = "html" in inject.headers.get("Content-Type", "").lower()
+    if is_html and marker in inject.body:
+        return CheckResult("confirmed", endpoint, "medium", f"{param}={marker}",
+                           f"Payload {marker} reflected unencoded in an HTML response "
+                           "(executable markup context).", files=files)
+    if f"&lt;{token}" in inject.body or (token in inject.body and marker not in inject.body):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="reflected value is HTML-encoded or "
+                                                 "non-HTML (not executable)")
+    return CheckResult("unconfirmed", endpoint, files=files)

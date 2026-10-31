@@ -10,6 +10,8 @@ CMD_PARAM_HINTS = {"host", "ip", "domain", "cmd", "command", "ping", "dns", "url
 ID_PARAM_HINTS = {"id", "user", "userid", "user_id", "account", "accountid", "uid", "oid"}
 FILE_PARAM_HINTS = {"file", "filename", "filepath", "path", "doc", "document", "page",
                     "template", "download", "view", "attachment", "resource", "folder"}
+XSS_PARAM_HINTS = {"q", "query", "search", "s", "term", "keyword", "name", "message",
+                   "comment", "title", "text", "input", "content"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -77,6 +79,16 @@ def make_hypotheses(crawl) -> list:
                 hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
                              "class": "PATH-TRAVERSAL", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may reference a file path.",
+                             "status": "open"})
+
+    # XSS: params that plausibly get reflected into a response.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in XSS_PARAM_HINTS and ("XSS", ep["path"], p) not in seen:
+                seen.add(("XSS", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "XSS", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may be reflected into output.",
                              "status": "open"})
 
     for i, h in enumerate(hyps, 1):
