@@ -65,6 +65,17 @@ class AutonomousReconTests(unittest.TestCase):
         self.assertIn("host", ping["params"])
         self.assertIn("/me", crawl.js_endpoints)  # found in app.js
 
+    def test_discovers_hidden_paths_from_robots_and_sitemap(self):
+        crawl = crawl_site([self.base], Session(self.base))
+        paths = {ep["path"] for ep in crawl.endpoint_list()}
+        self.assertIn("/admin-panel", paths)        # disclosed by robots.txt Disallow
+        self.assertIn("/sitemap-only-page", paths)  # listed only in sitemap.xml
+        # crawling the disclosed panel surfaces the privileged action it links to
+        delete = next((ep for ep in crawl.endpoint_list()
+                       if ep["path"] == "/admin-panel/delete"), None)
+        self.assertIsNotNone(delete)
+        self.assertIn("username", delete["params"])
+
     def test_full_autonomous_run_confirms_both(self):
         t = self._target()
         execs = DynamicExecutors(self.base,

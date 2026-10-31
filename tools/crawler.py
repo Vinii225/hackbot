@@ -13,6 +13,9 @@ ATTR_RE = {k: re.compile(k + r'\s*=\s*["\']([^"\']*)["\']', re.I) for k in ("act
 INPUT_NAME_RE = re.compile(
     r'<(?:input|select|textarea)\b[^>]*\bname\s*=\s*["\']([^"\']+)["\']', re.I)
 JS_EP_RE = re.compile(r'["\'`](/[A-Za-z0-9_\-/.]+)["\'`]')
+ROBOTS_PATH_RE = re.compile(r"^\s*(?:dis)?allow\s*:\s*(\S+)", re.I | re.M)
+ROBOTS_SITEMAP_RE = re.compile(r"^\s*sitemap\s*:\s*(\S+)", re.I | re.M)
+SITEMAP_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
 
 
 class CrawlResult:
@@ -58,11 +61,45 @@ class CrawlResult:
                 "js_files": sorted(self.js_files)}
 
 
+def _enqueue(url, allowed, res, queue, seen):
+    url = urldefrag(url)[0]
+    if urlsplit(url).netloc not in allowed or "*" in url:
+        return
+    res.add_endpoint(url, "GET")
+    res.collect_ids_from_path(url)
+    if url not in seen:
+        queue.append((url, 1))
+
+
+def _seed_wellknown(base_urls, session, allowed, res, queue, seen, max_requests):
+    """Seed hidden paths from robots.txt and sitemap.xml — common info-disclosure sources
+    that reveal admin panels and endpoints no page links to."""
+    roots = {f"{urlsplit(u).scheme}://{urlsplit(u).netloc}" for u in base_urls}
+    sitemaps = {r + "/sitemap.xml" for r in roots}
+    for root in roots:
+        if session.request_count >= max_requests:
+            return
+        robots = session.get(root + "/robots.txt")
+        if robots.status != 200:
+            continue
+        for path in ROBOTS_PATH_RE.findall(robots.body or ""):
+            _enqueue(urljoin(root + "/", path), allowed, res, queue, seen)
+        sitemaps.update(ROBOTS_SITEMAP_RE.findall(robots.body or ""))
+    for sm in sitemaps:
+        if session.request_count >= max_requests or urlsplit(sm).netloc not in allowed:
+            continue
+        doc = session.get(sm)
+        if doc.status == 200:
+            for loc in SITEMAP_LOC_RE.findall(doc.body or ""):
+                _enqueue(loc, allowed, res, queue, seen)
+
+
 def crawl_site(base_urls, session, max_requests=60, max_depth=2):
     allowed = {urlsplit(u).netloc for u in base_urls}
     res = CrawlResult()
     seen = set()
     queue = deque((u, 0) for u in base_urls)
+    _seed_wellknown(base_urls, session, allowed, res, queue, seen, max_requests)
 
     while queue and session.request_count < max_requests:
         url, depth = queue.popleft()

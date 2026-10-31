@@ -10,6 +10,9 @@ Scenarios:
   GET  /ping?host=              reflected OS command injection, output returned       (VULN)
   GET  /ping-blind?host=        blind command injection: executes, no output         (VULN)
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
+  GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
+  GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
+  GET  /admin-panel             privileged panel reachable without auth               (VULN)
 
 The "shell" is EMULATED (_fake_shell): it never spawns a real process or shell. It honors
 command separators / substitutions and a tiny safe builtin set (echo, sleep, nslookup,
@@ -150,6 +153,21 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_raw(200, page, "text/html")
         if path == "/static/app.js":
             return self._send_raw(200, APP_JS, "application/javascript")
+
+        if path == "/robots.txt":
+            return self._send_raw(200, "User-agent: *\nDisallow: /admin-panel\n",
+                                  "text/plain")
+        if path == "/sitemap.xml":
+            loc = f"http://{self.headers.get('Host', '')}/sitemap-only-page"
+            return self._send_raw(200, f'<?xml version="1.0"?><urlset><url><loc>{loc}'
+                                       "</loc></url></urlset>", "application/xml")
+        if path == "/admin-panel":
+            return self._send_raw(200, '<!doctype html><html><body><a href='
+                                       '"/admin-panel/delete?username=carlos">Delete</a>'
+                                       "</body></html>", "text/html")
+        if path == "/sitemap-only-page":
+            return self._send_raw(200, "<!doctype html><html><body>hidden</body></html>",
+                                  "text/html")
 
         if path == "/me":
             if not who:
