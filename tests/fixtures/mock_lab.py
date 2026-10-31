@@ -17,6 +17,7 @@ whoami, id) so injection is observable deterministically without any real execut
 """
 from __future__ import annotations
 
+import html
 import json
 import posixpath
 import re
@@ -39,6 +40,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <h1>Account</h1>
 <a href="/api/user/{id}">My account (API)</a>
 <a href="/download?file=welcome.txt">Download welcome</a>
+<a href="/search?q=test">Search</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
 <script src="/static/app.js"></script>
@@ -144,8 +146,8 @@ class _Handler(BaseHTTPRequestHandler):
         who = self._session_user()
 
         if path == "/":
-            html = INDEX_HTML.format(id=USERS[who]["id"]) if who else LOGIN_HTML
-            return self._send_raw(200, html, "text/html")
+            page = INDEX_HTML.format(id=USERS[who]["id"]) if who else LOGIN_HTML
+            return self._send_raw(200, page, "text/html")
         if path == "/static/app.js":
             return self._send_raw(200, APP_JS, "application/javascript")
 
@@ -188,6 +190,17 @@ class _Handler(BaseHTTPRequestHandler):
             if resolved in VFS:
                 return self._send_raw(200, VFS[resolved], "text/plain")
             return self._send(404, {"error": "file not found"})
+
+        if path == "/search":
+            q = self._query().get("q", "")
+            # VULN: user input reflected into HTML without encoding.
+            return self._send_raw(200, f"<!doctype html><html><body><p>Results for: {q}"
+                                       "</p></body></html>", "text/html")
+
+        if path == "/safe-search":
+            q = self._query().get("q", "")
+            return self._send_raw(200, f"<!doctype html><html><body><p>Results for: "
+                                       f"{html.escape(q)}</p></body></html>", "text/html")
 
         if path == "/ping":
             host = self._query().get("host", "")
