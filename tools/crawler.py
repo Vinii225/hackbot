@@ -1,8 +1,5 @@
-"""Bounded, in-scope crawler. Discovers the attack surface from a base URL using an
-existing (optionally logged-in) Session: links, forms, query params, same-origin JS, and
-object identifiers (numeric / UUID). Stays on the allowed hosts and stops at request/depth
-limits. No external dependencies — regex-based HTML/JS scraping, good enough for recon.
-"""
+"""Bounded, in-scope crawler: discovers endpoints, forms, params, same-origin JS and
+object ids from a base URL, staying on allowed hosts within request/depth limits."""
 from __future__ import annotations
 
 import re

@@ -1,15 +1,5 @@
-"""Prompt builders for the real (LLM-driven) executors.
-
-Pure functions: given a task, assemble the instruction that tells a coding-agent LLM
-which role/skill/contract files to follow and exactly which artifacts to write to disk.
-Kept separate from llm.py so they can be unit-tested without invoking any model.
-
-Each builder embeds a stable marker string so a test harness (or a human) can tell which
-phase a prompt belongs to:
-  recon  -> "PHASE: RECON"
-  hunt   -> "PHASE: HUNT"
-  report -> "PHASE: REPORT"
-"""
+"""Pure prompt builders for the LLM executors. Each embeds a 'PHASE: ...' marker so a
+test (or a human) can tell which phase a prompt belongs to."""
 from __future__ import annotations
 
 import json

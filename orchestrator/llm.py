@@ -1,17 +1,6 @@
-"""Real executors: drive an LLM coding-agent (the Claude Code CLI by default) to do the
-recon / exploitation / reporting work described by the Markdown agents, writing the same
-on-disk contract artifacts the simulation produces.
-
-The loop (core.py) is unchanged: it still only reads artifacts from disk and enforces all
-limits. This module just fills the executor seam with real work.
-
-Design:
-  - Prompt building is delegated to prompts.py (pure, testable).
-  - The actual invocation is an injected `invoke(prompt, cwd)` callable, so tests pass a
-    fake model and the whole pipeline runs offline. The default invokes the `claude` CLI
-    in non-interactive print mode (override with env HACKBOT_LLM_CMD).
-  - Request counts are read from small sidecar files the agent is instructed to write.
-"""
+"""Real executors: drive an LLM coding agent (the Claude CLI by default) to do the recon /
+exploitation / reporting work, writing the same on-disk artifacts the simulation produces.
+The invoke callable is injectable, so the pipeline is testable offline with a fake model."""
 from __future__ import annotations
 
 import os

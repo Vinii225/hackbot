@@ -1,17 +1,8 @@
-"""Optional LLM triage layer — provider-agnostic, degrades gracefully.
+"""Optional, provider-agnostic LLM triage layer (claude / ollama / openai).
 
-The LLM is used as a *decision layer*, never as the hands: it reads what the deterministic
-engine already produced (hypotheses, findings) and helps prioritize and explain. It makes
-only a couple of small calls per scan, so it is cheap on any backend — and if no backend
-is available (or a call fails) the pipeline runs exactly as before.
-
-Backends (pick with --triage or HACKBOT_LLM, else 'none'):
-  claude  -> `claude -p` CLI            (uses the user's existing Claude subscription)
-  ollama  -> http://localhost:11434     (free, local; set HACKBOT_OLLAMA_MODEL)
-  openai  -> any OpenAI-compatible API   (OPENAI_BASE_URL + OPENAI_API_KEY + model)
-  none    -> disabled
-  auto    -> first of the above that looks available
-"""
+The LLM is a decision layer, never the hands: it reads what the deterministic engine
+produced and helps prioritize and explain. If no backend is available, or a call fails,
+the pipeline runs unchanged. Backends and env vars are documented in the README."""
 from __future__ import annotations
 
 import json
@@ -28,7 +19,6 @@ def _env(key, default=None):
     return os.environ.get(key, default)
 
 
-# ------------------------------------------------------------------- backends (invoke fns)
 
 def claude_invoke(prompt: str) -> str:
     cmd = shlex.split(_env("HACKBOT_CLAUDE_CMD", "claude -p"))
@@ -100,7 +90,6 @@ def resolve_backend(choice="auto"):
     return "none", None
 
 
-# --------------------------------------------------------------------------- triage layer
 
 class TriageLayer:
     def __init__(self, invoke=None, name="none", log=print):

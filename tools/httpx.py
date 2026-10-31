@@ -1,12 +1,5 @@
-"""Minimal HTTP session client with raw-evidence capture. Stdlib only (urllib).
-
-This is the real plumbing the dynamic executors use: a cookie-backed session (so you can
-log in as one user and reuse that session across requests), plus helpers to persist the
-exact request and response as evidence files.
-
-Not a replacement for Burp/ZAP — just enough to drive authenticated access-control tests
-reproducibly and keep raw evidence on disk.
-"""
+"""Minimal cookie-backed HTTP session with raw request/response evidence capture.
+Stdlib only (urllib)."""
 from __future__ import annotations
 
 import http.cookiejar

@@ -1,14 +1,5 @@
-"""Core of the programmatic Coordinator loop.
-
-This is the real, code-driven version of the loop described in COORDINATOR.md.
-It owns state, enforces every limit, and decides when to stop. The actual recon /
-exploitation work is delegated to an "executors" object (see agents.py), so the loop
-itself never touches the network and is fully testable offline.
-
-Loop safety ("cuidado com o loop"): the loop terminates on ANY of
-  max_iterations, max_requests, max_runtime_seconds, no-progress, missing scope,
-  operator stop, objective-complete, or no-actions.
-"""
+"""Programmatic Coordinator loop: owns state, enforces limits, decides when to stop.
+Recon/exploitation is delegated to an executors object, keeping the loop offline-testable."""
 from __future__ import annotations
 
 import json
@@ -109,7 +100,6 @@ class StateStore:
         self.state["current_phase"] = "done"
         self.save(clock)
 
-    # --- dedupe ledger ---
     def is_tested(self, endpoint, method, technique):
         key = (endpoint, method, technique)
         return any(
@@ -146,7 +136,6 @@ class StateStore:
             "report": str(self.dir / "reports" / "REPORT.md"),
         }
 
-    # --- artifact helpers ---
     def hypotheses(self):
         return _load(self.dir / "recon" / "hypotheses.json", [])
 
@@ -172,10 +161,7 @@ class StateStore:
 
 
 def load_scope(target_dir):
-    """Enforce 'stop, don't guess': scope must exist and name a real in-scope host.
-
-    Returns (ok: bool, reason: str, urls: list[str]).
-    """
+    """Scope must exist and name a real in-scope host, else stop. Returns (ok, reason, urls)."""
     p = Path(target_dir) / "scope.md"
     if not p.exists():
         return False, "scope.md-missing", []

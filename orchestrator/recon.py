@@ -1,9 +1,4 @@
-"""Turn crawl results into hypotheses + a tech fingerprint.
-
-Heuristics only (no LLM): an endpoint with a numeric/UUID id in its path (or an id-like
-query param) -> IDOR candidate; a parameter whose name suggests it reaches an OS command
--> CMDI candidate. Deliberately conservative so the hunters get real candidates, not noise.
-"""
+"""Turn crawl results into a tech fingerprint and conservative vulnerability hypotheses."""
 from __future__ import annotations
 
 import re
