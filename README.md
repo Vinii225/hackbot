@@ -114,26 +114,26 @@ Run the tests (stdlib only):
 python -m unittest discover -s tests -v
 ```
 
-### Dynamic executor + end-to-end proof
+### Checkers + end-to-end proof
 
-`orchestrator/http_exec.py:HttpIdorExecutors` is a deterministic (no-LLM) implementation
-of the `idor.md` procedure over real HTTP, using the session/evidence client in
-`tools/httpx.py`. `tests/test_e2e_idor.py` boots an intentionally-vulnerable local
-fixture (`tests/fixtures/mock_lab.py`), runs the full loop against it, and asserts the
-IDOR is confirmed from real captured request/response evidence and a report is written —
-proving the dynamic pipeline, not just the loop machinery.
+Each vulnerability class is a deterministic (no-LLM) checker registered in
+`orchestrator/checks.py` (`check_idor`, `check_cmdi`, `check_path_traversal`), driving the
+corresponding `*.md` procedure over real HTTP via the session/evidence client in
+`tools/httpx.py`. The `tests/test_e2e_*.py` suites boot an intentionally-vulnerable local
+fixture (`tests/fixtures/mock_lab.py`) and assert each class is confirmed from real
+captured evidence — and that safe endpoints are reported as false positives, not vulns.
 
 For a real PortSwigger lab, see `targets/portswigger-idor/RUNBOOK.md`.
 
 ### Autonomous recon
 
-`orchestrator/http_exec.py:DynamicExecutors` is the point-and-go set: given only a base
-URL (and optional credentials), recon uses the bounded, in-scope crawler
-(`tools/crawler.py`) to discover endpoints, params, forms, same-origin JS and object ids,
-then `orchestrator/recon.py` turns those into hypotheses (numeric/UUID object id -> IDOR;
-command-ish param name -> CMDI). Hunt dispatches each hypothesis to `confirm_idor` /
-`confirm_cmdi`. `tests/test_recon.py` proves it discovers the surface and confirms both
-vulns against the local fixture without being handed any endpoint.
+`orchestrator/scanner.py:DynamicExecutors` is the point-and-go set: given only a base URL
+(and optional credentials), recon uses the bounded, in-scope crawler (`tools/crawler.py`)
+to discover endpoints, params, forms, same-origin JS and object ids, then
+`orchestrator/recon.py` turns those into hypotheses (object id -> IDOR; command-ish param
+-> CMDI; file-ish param -> path traversal). Hunt looks up the registered checker for each
+hypothesis class, so adding a skill never touches the dispatcher. `tests/test_recon.py`
+proves it discovers the surface and confirms the vulns without being handed any endpoint.
 
 ## Tools
 

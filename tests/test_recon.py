@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from orchestrator.core import run_engagement
-from orchestrator.http_exec import DynamicExecutors
+from orchestrator.scanner import DynamicExecutors
 from orchestrator.recon import make_hypotheses, templatize
 from tests.fixtures.mock_lab import start_mock_lab
 from tools.crawler import crawl_site
