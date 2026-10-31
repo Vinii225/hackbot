@@ -16,6 +16,15 @@ JS_EP_RE = re.compile(r'["\'`](/[A-Za-z0-9_\-/.]+)["\'`]')
 ROBOTS_PATH_RE = re.compile(r"^\s*(?:dis)?allow\s*:\s*(\S+)", re.I | re.M)
 ROBOTS_SITEMAP_RE = re.compile(r"^\s*sitemap\s*:\s*(\S+)", re.I | re.M)
 SITEMAP_LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
+DESTRUCTIVE_RE = re.compile(
+    r"(?:delete|destroy|remove|drop|deactivate|disable|logout|sign-?out|reset|revoke|"
+    r"ban|purge|wipe|erase|cancel|unsubscribe)", re.I)
+
+
+def is_destructive(url):
+    """A link whose path suggests a state-changing action. We record these but never
+    follow them: fetching e.g. /delete?user=x during recon would carry out the action."""
+    return bool(DESTRUCTIVE_RE.search(urlsplit(url).path))
 
 
 class CrawlResult:
@@ -70,7 +79,7 @@ def _enqueue(url, allowed, res, queue, seen, hidden=False):
     res.collect_ids_from_path(url)
     if hidden:
         res.hidden_paths.add(urlsplit(url).path)
-    if url not in seen:
+    if url not in seen and not is_destructive(url):
         queue.append((url, 1))
 
 
@@ -128,6 +137,8 @@ def crawl_site(base_urls, session, max_requests=60, max_depth=2):
                     continue
                 if link.endswith(".js") or "/static/" in urlsplit(link).path:
                     res.js_files.add(link)
+                elif is_destructive(link):
+                    res.add_endpoint(link, "GET")  # recorded, never auto-followed
                 elif urldefrag(link)[0] not in seen and depth < max_depth:
                     queue.append((link, depth + 1))
             for attrs, inner in FORM_RE.findall(body):

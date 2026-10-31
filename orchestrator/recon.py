@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from tools.crawler import UUID_RE
+from tools.crawler import UUID_RE, is_destructive
 
 CMD_PARAM_HINTS = {"host", "ip", "domain", "cmd", "command", "ping", "dns", "url",
                    "target", "addr", "nslookup", "exec", "run"}
@@ -99,7 +99,7 @@ def make_hypotheses(crawl) -> list:
     for ep in endpoints:
         path = ep["path"]
         if (path in hidden or any(k in path.lower() for k in ADMIN_PATH_HINTS)) \
-                and ("ACCESS-CONTROL", path) not in seen:
+                and not is_destructive(path) and ("ACCESS-CONTROL", path) not in seen:
             seen.add(("ACCESS-CONTROL", path))
             why = "disclosed by robots.txt" if path in hidden else "admin-like path"
             hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,

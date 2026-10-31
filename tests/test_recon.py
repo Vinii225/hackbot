@@ -10,6 +10,7 @@ from pathlib import Path
 from orchestrator.core import run_engagement
 from orchestrator.scanner import DynamicExecutors
 from orchestrator.recon import make_hypotheses, templatize
+from tests.fixtures import mock_lab
 from tests.fixtures.mock_lab import start_mock_lab
 from tools.crawler import crawl_site
 from tools.httpx import Session
@@ -75,6 +76,15 @@ class AutonomousReconTests(unittest.TestCase):
                        if ep["path"] == "/admin-panel/delete"), None)
         self.assertIsNotNone(delete)
         self.assertIn("username", delete["params"])
+
+    def test_crawler_never_follows_destructive_links(self):
+        mock_lab.DELETED.clear()
+        crawl = crawl_site([self.base], Session(self.base))
+        # the delete link is discovered and recorded ...
+        paths = {ep["path"] for ep in crawl.endpoint_list()}
+        self.assertIn("/admin-panel/delete", paths)
+        # ... but never fetched, so no state change happened
+        self.assertEqual(mock_lab.DELETED, set())
 
     def test_full_autonomous_run_confirms_both(self):
         t = self._target()

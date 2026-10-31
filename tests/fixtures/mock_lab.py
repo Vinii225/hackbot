@@ -51,6 +51,7 @@ INDEX_HTML = """<!doctype html><html><body>
 </body></html>"""
 
 # Emulated virtual filesystem for the path-traversal scenario (no real files touched).
+DELETED = set()  # records destructive hits so a test can assert the crawler never fires one
 BASE_DIR = "/var/www/files"
 VFS = {
     "/var/www/files/welcome.txt": "Welcome to the lab.\n",
@@ -173,6 +174,11 @@ class _Handler(BaseHTTPRequestHandler):
             if not who:
                 return self._send(401, {"error": "login required"})  # SAFE: auth enforced
             return self._send(200, {"panel": "admin"})
+        if path == "/admin-panel/delete":
+            user = self._query().get("username", "")
+            if user:
+                DELETED.add(user)  # state change: a scanner must never trigger this in recon
+            return self._send(200, {"deleted": user})
 
         if path == "/me":
             if not who:
