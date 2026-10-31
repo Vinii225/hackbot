@@ -77,6 +77,13 @@ class AutonomousReconTests(unittest.TestCase):
         self.assertIsNotNone(delete)
         self.assertIn("username", delete["params"])
 
+    def test_discovers_path_from_inline_script(self):
+        s = Session(self.base)
+        s.post("/login", data={"username": "wiener", "password": "peter"})
+        crawl = crawl_site([self.base], s)
+        paths = {ep["path"] for ep in crawl.endpoint_list()}
+        self.assertIn("/admin-x7y8z9", paths)  # only present as a JS string literal
+
     def test_crawler_never_follows_destructive_links(self):
         mock_lab.DELETED.clear()
         crawl = crawl_site([self.base], Session(self.base))

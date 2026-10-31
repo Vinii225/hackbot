@@ -149,6 +149,13 @@ def crawl_site(base_urls, session, max_requests=60, max_depth=2):
                     continue
                 res.add_endpoint(act, method.group(1) if method else "GET",
                                  INPUT_NAME_RE.findall(inner))
+            # mine path literals from inline scripts/comments (admin links are often
+            # emitted by JS, e.g. behind an isAdmin flag), recorded but not auto-followed
+            for ep in JS_EP_RE.findall(body):
+                link = urljoin(url, ep)
+                if urlsplit(link).netloc in allowed and not ep.endswith((".js", ".css")):
+                    res.add_endpoint(link, "GET")
+                    res.js_endpoints.add(ep)
 
     for js in list(res.js_files):
         if session.request_count >= max_requests:

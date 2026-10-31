@@ -48,6 +48,8 @@ INDEX_HTML = """<!doctype html><html><body>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
 <script src="/static/app.js"></script>
+<script>var isAdmin=false; if(isAdmin){{var a=document.createElement('a');
+a.setAttribute('href','/admin-x7y8z9');}}</script>
 </body></html>"""
 
 # Emulated virtual filesystem for the path-traversal scenario (no real files touched).
@@ -174,6 +176,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not who:
                 return self._send(401, {"error": "login required"})  # SAFE: auth enforced
             return self._send(200, {"panel": "admin"})
+        if path == "/admin-x7y8z9":
+            return self._send_raw(200, "<!doctype html><html><body>admin panel"
+                                       "</body></html>", "text/html")  # VULN: disclosed in JS
         if path == "/admin-panel/delete":
             user = self._query().get("username", "")
             if user:
