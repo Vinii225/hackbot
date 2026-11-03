@@ -3,6 +3,7 @@ registered checker for each class; report renders confirmed findings."""
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from tools.crawler import crawl_site
@@ -16,6 +17,25 @@ from .report import write_report
 def _save(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _attr(tag, attr):
+    m = (re.search(attr + r'\s*=\s*"([^"]*)"', tag, re.I)
+         or re.search(attr + r"\s*=\s*'([^']*)'", tag, re.I)
+         or re.search(attr + r"\s*=\s*([^\s>]+)", tag, re.I))
+    return m.group(1) if m else None
+
+
+def _hidden_fields(html):
+    """Hidden inputs from a form (csrf tokens and the like), carried into the POST so
+    the login survives CSRF protection."""
+    out = {}
+    for tag in re.findall(r"<input\b[^>]*>", html or "", re.I):
+        if (_attr(tag, "type") or "").lower() == "hidden":
+            name = _attr(tag, "name")
+            if name:
+                out[name] = _attr(tag, "value") or ""
+    return out
 
 
 def _finding(fid, hyp, res: CheckResult, requests_used):
@@ -41,8 +61,11 @@ class DynamicExecutors:
     def _session(self):
         session = Session(self.base)
         if self.accounts:
-            session.post(self.login_path, data={"username": self.accounts[0]["username"],
-                                                "password": self.accounts[0]["password"]})
+            acct = self.accounts[0]
+            page = session.get(self.login_path)  # pick up csrf token + session cookie
+            creds = {"username": acct["username"], "password": acct["password"]}
+            creds.update(_hidden_fields(page.body))
+            session.post(self.login_path, data=creds)
         return session
 
     def recon(self, store, urls, objective):
