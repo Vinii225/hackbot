@@ -14,6 +14,8 @@ XSS_PARAM_HINTS = {"q", "query", "search", "s", "term", "keyword", "name", "mess
                    "comment", "title", "text", "input", "content"}
 ADMIN_PATH_HINTS = ("admin", "administrator", "manage", "management", "dashboard",
                     "console", "internal", "staff", "moderator", "superuser")
+SQLI_PARAM_HINTS = {"category", "cat", "filter", "sort", "order", "search", "q", "query",
+                    "name", "product", "productid", "id", "user", "username", "email"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -91,6 +93,16 @@ def make_hypotheses(crawl) -> list:
                 hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
                              "class": "XSS", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may be reflected into output.",
+                             "status": "open"})
+
+    # SQLI: params that plausibly flow into a SQL query (filters, lookups, ids).
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in SQLI_PARAM_HINTS and ("SQLI", ep["path"], p) not in seen:
+                seen.add(("SQLI", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "SQLI", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may flow into a SQL query.",
                              "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

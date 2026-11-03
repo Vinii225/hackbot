@@ -9,6 +9,10 @@ Scenarios:
   GET  /api/safe-user/<id>      access-controlled: 403 unless you own <id>           (SAFE)
   GET  /account?id=<username>   IDOR: returns any account by username, no check       (VULN)
   GET  /safe-account?id=        access-controlled: 403 unless id is your own          (SAFE)
+  GET  /filter?category=        error-based SQLi (DB error on a bad quote)             (VULN)
+  GET  /filter-blind?category=  boolean-based SQLi (rows differ, errors hidden)        (VULN)
+  GET  /filter-timeblind?       time-based blind SQLi (pg_sleep executes)             (VULN)
+  GET  /safe-filter?category=   parameterized query, input is data                    (SAFE)
   GET  /ping?host=              reflected OS command injection, output returned       (VULN)
   GET  /ping-blind?host=        blind command injection: executes, no output         (VULN)
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
@@ -47,6 +51,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/api/user/{id}">My account (API)</a>
 <a href="/download?file=welcome.txt">Download welcome</a>
 <a href="/search?q=test">Search</a>
+<a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
 <script src="/static/app.js"></script>
@@ -56,7 +61,28 @@ a.setAttribute('href','/admin-x7y8z9');}}</script>
 
 # Emulated virtual filesystem for the path-traversal scenario (no real files touched).
 DELETED = set()  # records destructive hits so a test can assert the crawler never fires one
+PRODUCTS = [{"name": "Gift Voucher", "category": "Gifts", "released": 1},
+            {"name": "Gift Wrap", "category": "Gifts", "released": 1},
+            {"name": "Unreleased Gadget", "category": "Gifts", "released": 0}]
 BASE_DIR = "/var/www/files"
+
+
+def _fake_sql(value):
+    """Emulate 'SELECT name FROM products WHERE category=<value> AND released=1' with the
+    value concatenated unsafely. Never touches a real database."""
+    m = re.search(r"(?:pg_sleep|sleep)\((\d+)\)", value, re.I)
+    if m:
+        time.sleep(min(float(m.group(1)), SLEEP_CAP))
+    before_comment = re.split(r"--", value, 1)[0]
+    if "--" not in value and before_comment.count("'") % 2 == 1:
+        return "error", None  # unbalanced quote breaks the query
+    low = value.lower()
+    if re.search(r"'\s*or\s*'?1'?\s*=\s*'?1", low) or re.search(r"\bor\s+1\s*=\s*1", low):
+        return "ok", [p["name"] for p in PRODUCTS]              # always true -> all rows
+    if re.search(r"'\s*and\s*'?1'?\s*=\s*'?2", low) or re.search(r"\band\s+1\s*=\s*2", low):
+        return "ok", []                                        # always false -> none
+    val = value.strip("'")
+    return "ok", [p["name"] for p in PRODUCTS if p["released"] and p["category"] == val]
 VFS = {
     "/var/www/files/welcome.txt": "Welcome to the lab.\n",
     "/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nlabuser:x:1000:1000::/home/labuser:/bin/sh\n",
@@ -226,6 +252,23 @@ class _Handler(BaseHTTPRequestHandler):
             if self._query().get("id", who) != who:
                 return self._send(403, {"error": "forbidden"})  # SAFE: ownership enforced
             return self._send(200, {"username": who, "apiKey": USERS[who]["apiKey"]})
+
+        if path == "/filter":
+            status, rows = _fake_sql(self._query().get("category", ""))
+            if status == "error":  # VULN: error-based SQLi, DB error surfaced
+                return self._send_raw(500, "ERROR: unterminated quoted string at or near \"'\""
+                                           "\nSQLSTATE 42601: syntax error", "text/plain")
+            return self._send(200, {"products": rows})
+        if path == "/filter-blind":
+            status, rows = _fake_sql(self._query().get("category", ""))
+            return self._send(200, {"products": [] if status == "error" else rows})  # VULN: boolean
+        if path == "/filter-timeblind":
+            _fake_sql(self._query().get("category", ""))  # VULN: executes (sleep), leaks nothing
+            return self._send(200, {"status": "ok"})
+        if path == "/safe-filter":
+            val = self._query().get("category", "")  # SAFE: value bound as data, not SQL
+            return self._send(200, {"products": [p["name"] for p in PRODUCTS
+                                                 if p["released"] and p["category"] == val]})
 
         if path == "/download":
             name = self._query().get("file", "")

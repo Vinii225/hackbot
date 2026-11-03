@@ -14,6 +14,7 @@ you are explicitly authorized to test.
 - **Path Traversal** — `agents/vuln-hunter/skills/path-traversal/path-traversal.md`
 - **Reflected XSS** — `agents/vuln-hunter/skills/xss/xss.md`
 - **Broken Access Control** (unauthenticated privileged access) — `agents/vuln-hunter/skills/access-control/access-control.md`
+- **SQL Injection** (error / boolean / time-based) — `agents/vuln-hunter/skills/sqli/sqli.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -41,7 +42,7 @@ hackbot/
 ├── COORDINATOR.md          # orchestrator agent
 ├── agents/
 │   ├── recon/              AGENT.md + skills/recon.md
-│   ├── vuln-hunter/        AGENT.md + skills/{idor,cmdi,path-traversal,xss,access-control}/*.md
+│   ├── vuln-hunter/        AGENT.md + skills/{idor,cmdi,path-traversal,xss,access-control,sqli}/*.md
 │   └── reporter/           AGENT.md
 ├── contracts/              # JSON message schemas between agents
 ├── commands/               # /hackbot-coop and /hackbot-auto definitions
@@ -169,5 +170,5 @@ to the target.
 
 ## Roadmap (future skills, not in MVP)
 
-SSRF · SQL Injection · JWT · CORS · SSTI · GraphQL · XXE · CSRF — each added as a new
+SSRF · JWT · CORS · SSTI · GraphQL · XXE · CSRF — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.
