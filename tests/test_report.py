@@ -60,5 +60,28 @@ class ReportClassificationTests(unittest.TestCase):
         self.assertIn("[MEDIUM] XSS", report)  # from the catalog default
 
 
+class ExecutiveSummaryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_summary_counts_by_status_and_severity(self):
+        findings = [
+            {"status": "confirmed", "class": "SQLI", "endpoint": "/f",
+             "severity": "high", "evidence": {}},
+            {"status": "confirmed", "class": "XSS", "endpoint": "/s",
+             "severity": "medium", "evidence": {}},
+            {"status": "unconfirmed", "class": "IDOR", "endpoint": "/a", "evidence": {}},
+            {"status": "false-positive", "class": "CMDI", "endpoint": "/p", "evidence": {}},
+        ]
+        write_report(_FakeStore(self.tmp, findings))
+        report = (Path(self.tmp) / "reports" / "REPORT.md").read_text()
+        self.assertIn("Confirmed: 2 | Unconfirmed: 1 | False positives: 1", report)
+        self.assertIn("high: 1", report)
+        self.assertIn("medium: 1", report)
+        self.assertIn("Confirmed findings:", report)
+        self.assertIn("[HIGH] SQLI - /f", report)
+
+
 if __name__ == "__main__":
     unittest.main()
