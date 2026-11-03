@@ -7,6 +7,8 @@ Scenarios:
   GET  /me                      current session's user (for recon)
   GET  /api/user/<id>           IDOR: returns any account by id, no ownership check  (VULN)
   GET  /api/safe-user/<id>      access-controlled: 403 unless you own <id>           (SAFE)
+  GET  /account?id=<username>   IDOR: returns any account by username, no check       (VULN)
+  GET  /safe-account?id=        access-controlled: 403 unless id is your own          (SAFE)
   GET  /ping?host=              reflected OS command injection, output returned       (VULN)
   GET  /ping-blind?host=        blind command injection: executes, no output         (VULN)
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
@@ -206,6 +208,24 @@ class _Handler(BaseHTTPRequestHandler):
             if uid != USERS[who]["id"]:
                 return self._send(403, {"error": "forbidden"})   # SAFE: ownership enforced
             return self._send(200, _acct_view(BY_ID[uid]))
+
+        if path == "/account":
+            if not who:
+                return self._send(401, {"error": "not logged in"})
+            rid = self._query().get("id", who)
+            acct = USERS.get(rid)
+            if not acct:
+                return self._send(404, {"error": "no such user"})
+            # VULN: returns any account by username, no ownership check
+            return self._send(200, {"username": rid, "email": acct["email"],
+                                    "apiKey": acct["apiKey"]})
+
+        if path == "/safe-account":
+            if not who:
+                return self._send(401, {"error": "not logged in"})
+            if self._query().get("id", who) != who:
+                return self._send(403, {"error": "forbidden"})  # SAFE: ownership enforced
+            return self._send(200, {"username": who, "apiKey": USERS[who]["apiKey"]})
 
         if path == "/download":
             name = self._query().get("file", "")

@@ -40,6 +40,23 @@ class IdorCheckerTests(unittest.TestCase):
         self.assertEqual(res.status, "false-positive")
         self.assertIn("403", res.false_positive_reason)
 
+    def test_confirms_cross_user_via_username_param(self):
+        ev = Path(self.tmp) / "ev-param"
+        res = check_idor(self._session(),
+                         {"endpoint": "/account", "parameter": "id", "method": "GET"},
+                         ev, CheckContext(actor="wiener"))
+        self.assertEqual(res.status, "confirmed")
+        self.assertIn("carlos", res.payload)
+        self.assertIn("APIKEY-CARLOS-0002", (ev / "cross-victim.response.http").read_text())
+
+    def test_param_access_controlled_is_false_positive(self):
+        ev = Path(self.tmp) / "ev-param-safe"
+        res = check_idor(self._session(),
+                         {"endpoint": "/safe-account", "parameter": "id", "method": "GET"},
+                         ev, CheckContext(actor="wiener"))
+        self.assertEqual(res.status, "false-positive")
+        self.assertIn("403", res.false_positive_reason)
+
 
 if __name__ == "__main__":
     unittest.main()

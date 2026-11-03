@@ -60,11 +60,22 @@ def _query_sender(session, endpoint, param, method):
     return send
 
 
+# Common second-identity names to try when object ids are usernames, not integers.
+PEER_USERS = ("carlos", "administrator", "admin")
+
+
 @register("IDOR")
 def check_idor(session, hyp, ev_dir, ctx):
+    if "{id}" in hyp["endpoint"]:
+        return _idor_path(session, hyp, ev_dir, ctx)
+    return _idor_param(session, hyp, ev_dir, ctx)
+
+
+def _idor_path(session, hyp, ev_dir, ctx):
     template = hyp["endpoint"]
     id_field = hyp.get("id_field", "email")
-    own = (session.get(ctx.me_path).json() or {}).get("id")
+    me = session.get(ctx.me_path).json()
+    own = me.get("id") if isinstance(me, dict) else None
     discovered = [i for i in hyp.get("object_ids", []) if isinstance(i, int)]
     candidates = [c for c in dict.fromkeys(discovered + _around(own))
                   if isinstance(c, int) and c > 0 and c != own]
@@ -94,6 +105,41 @@ def check_idor(session, hyp, ev_dir, ctx):
                                false_positive_reason=f"cross-object request returned "
                                                      f"{last.status} (access controlled)")
     return CheckResult("unconfirmed", template, files=files)
+
+
+def _idor_param(session, hyp, ev_dir, ctx):
+    """Object id in a query/body parameter (e.g. /my-account?id=wiener). Differential:
+    the response for a peer id must differ from our own and name that peer."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    own = ctx.actor
+
+    baseline = send(own)
+    files = save_evidence(ev_dir, "baseline-own", baseline)
+    own_body = baseline.body or ""
+
+    discovered = [str(i) for i in hyp.get("object_ids", [])]
+    peers = [p for p in dict.fromkeys(discovered + list(PEER_USERS)) if p and p != own]
+
+    last = None
+    for peer in peers:
+        cross = send(peer)
+        last = cross
+        body = cross.body or ""
+        if cross.status == 200 and peer in body and body != own_body:
+            files += save_evidence(ev_dir, "cross-victim", cross)
+            return CheckResult(
+                "confirmed", endpoint, "high", f"{param}={peer}",
+                f"Session of '{own}' read another user's account via {param}={peer} "
+                f"(response differs from own and names '{peer}').", files=files)
+
+    if last is not None:
+        files += save_evidence(ev_dir, "cross-victim", last)
+        if last.status in (401, 403):
+            return CheckResult("false-positive", endpoint, files=files,
+                               false_positive_reason=f"cross-user request returned "
+                                                     f"{last.status} (access controlled)")
+    return CheckResult("unconfirmed", endpoint, files=files)
 
 
 @register("CMDI")
