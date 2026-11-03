@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .export import write_exports
 from .report import write_report
 
 
@@ -52,4 +53,6 @@ class SimulationExecutors:
                 "status": finding["status"], "requests_used": outcome.get("requests_used", 0)}
 
     def report(self, store):
-        return write_report(store)
+        result = write_report(store)
+        result["exports"] = write_exports(store)
+        return result

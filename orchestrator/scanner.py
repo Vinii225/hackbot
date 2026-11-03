@@ -11,6 +11,7 @@ from tools.httpx import Session
 
 from .checks import CheckContext, CheckResult, get_checker
 from .recon import fingerprint, make_hypotheses
+from .export import write_exports
 from .report import write_report
 
 
@@ -99,4 +100,6 @@ class DynamicExecutors:
                 "status": res.status, "requests_used": session.request_count}
 
     def report(self, store):
-        return write_report(store)
+        result = write_report(store)
+        result["exports"] = write_exports(store)
+        return result
