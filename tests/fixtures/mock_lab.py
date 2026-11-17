@@ -73,7 +73,7 @@ def _fake_sql(value):
     m = re.search(r"(?:pg_sleep|sleep)\((\d+)\)", value, re.I)
     if m:
         time.sleep(min(float(m.group(1)), SLEEP_CAP))
-    before_comment = re.split(r"--", value, 1)[0]
+    before_comment = re.split(r"--", value, maxsplit=1)[0]
     if "--" not in value and before_comment.count("'") % 2 == 1:
         return "error", None  # unbalanced quote breaks the query
     low = value.lower()
