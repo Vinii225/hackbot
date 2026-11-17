@@ -8,7 +8,7 @@ from collections import Counter
 from xml.sax.saxutils import escape
 
 from .catalog import CLASS_META, meta_for
-from .report import _SEVERITY_ORDER, _severity, coverage
+from .report import _SEVERITY_ORDER, _severity, coverage, scope_summary
 
 _SEVERITIES = ("critical", "high", "medium", "low")
 _SEV_COLOR = {"critical": "#7b1fa2", "high": "#d32f2f", "medium": "#f57c00",
@@ -25,6 +25,7 @@ def _model(store):
         "target": store.dir.name,
         "mode": store.state.get("mode"),
         "objective": store.state.get("objective"),
+        "scope": scope_summary(store),
         "summary": {
             "confirmed": by_status.get("confirmed", 0),
             "unconfirmed": by_status.get("unconfirmed", 0),
@@ -88,6 +89,7 @@ padding:4px 16px;margin:12px 0}}code{{background:#f4f4f4;padding:1px 4px;border-
 ul{{padding-left:18px}}.meta{{color:#555;font-size:13px}}</style></head><body>
 <h1>Security Assessment Report &mdash; {escape(str(m['target']))}</h1>
 <p class="meta">Mode: {escape(str(m['mode']))} &middot; Objective: {escape(str(m['objective']))}</p>
+<p class="meta">Authorized scope: {escape(str(m['scope']))}</p>
 <h2>Executive Summary</h2>
 <p>Confirmed: <b>{m['summary']['confirmed']}</b> &middot; Unconfirmed: {m['summary']['unconfirmed']}
 &middot; False positives: {m['summary']['false_positive']}</p>
@@ -145,6 +147,7 @@ def write_docx(store):
     m = _model(store)
     body = [_para(f"Security Assessment Report - {m['target']}", bold=True, size=36),
             _para(f"Mode: {m['mode']}  |  Objective: {m['objective']}"),
+            _para(f"Authorized scope: {m['scope']}"),
             _para("Executive Summary", bold=True, size=28),
             _para(f"Confirmed: {m['summary']['confirmed']}  |  Unconfirmed: "
                   f"{m['summary']['unconfirmed']}  |  False positives: "

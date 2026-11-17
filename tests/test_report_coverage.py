@@ -33,6 +33,17 @@ class ReportCoverageTests(unittest.TestCase):
         self.assertIn("Not reached", md)
         self.assertIn("CRLF", md.split("Not reached")[1])
 
+    def test_scope_is_echoed(self):
+        (self.tmp / "scope.md").write_text(
+            "# Scope\n## In scope\n```\nhttps://lab-abc.example-target.net\n```\n")
+        write_report(self.store)
+        md = (self.tmp / "reports" / "REPORT.md").read_text()
+        self.assertIn("Authorized scope: https://lab-abc.example-target.net", md)
+
+    def test_scope_na_without_scope_file(self):
+        write_report(self.store)
+        self.assertIn("Authorized scope: n/a", (self.tmp / "reports" / "REPORT.md").read_text())
+
     def test_json_and_html_coverage(self):
         write_report(self.store)
         write_exports(self.store)

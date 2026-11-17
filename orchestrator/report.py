@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 
 from .catalog import CLASS_META, meta_for
+from .core import load_scope
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, None: 5}
 _SEVERITIES = ("critical", "high", "medium", "low")
@@ -12,6 +13,16 @@ _SEVERITIES = ("critical", "high", "medium", "low")
 def _severity(f) -> str:
     meta = meta_for(f.get("class")) or {}
     return (f.get("severity") or meta.get("severity") or "info").lower()
+
+
+def scope_summary(store) -> str:
+    """The authorized in-scope hosts, echoed into the report so the engagement's boundary is
+    on the record. Returns 'n/a' when scope is missing or still a placeholder."""
+    try:
+        ok, _reason, urls = load_scope(store.dir)
+    except Exception:
+        return "n/a"
+    return ", ".join(dict.fromkeys(urls)) if ok and urls else "n/a"
 
 
 def coverage(findings) -> dict:
@@ -57,7 +68,8 @@ def write_report(store) -> dict:
         f"# Security Assessment Report - {store.dir.name}", "",
         f"- Target: {store.dir.name}",
         f"- Mode: {store.state.get('mode')}",
-        f"- Objective: {store.state.get('objective')}", "",
+        f"- Objective: {store.state.get('objective')}",
+        f"- Authorized scope: {scope_summary(store)}", "",
         "## Executive Summary", "",
         f"- Confirmed: {by_status.get('confirmed', 0)} | "
         f"Unconfirmed: {by_status.get('unconfirmed', 0)} | "
