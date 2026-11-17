@@ -9,7 +9,7 @@ you are explicitly authorized to test.
 
 ## Vulnerability coverage
 
-Fifteen vulnerability classes ship as skills, each with a deterministic checker,
+Seventeen vulnerability classes ship as skills, each with a deterministic checker,
 vulnerable + safe fixtures and end-to-end tests:
 
 - **IDOR / Broken Access Control** — `agents/vuln-hunter/skills/idor/idor.md`
@@ -28,6 +28,8 @@ vulnerable + safe fixtures and end-to-end tests:
 - **Clickjacking (missing frame protection)** — `agents/vuln-hunter/skills/clickjacking/clickjacking.md`
 - **GraphQL Introspection** — `agents/vuln-hunter/skills/graphql/graphql.md`
 - **JWT alg:none Bypass** — `agents/vuln-hunter/skills/jwt/jwt.md`
+- **Verbose Error / Information Disclosure** — `agents/vuln-hunter/skills/info-disclosure/info-disclosure.md`
+- **Directory Listing** — `agents/vuln-hunter/skills/dir-listing/dir-listing.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 

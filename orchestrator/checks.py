@@ -587,3 +587,50 @@ def check_jwt(session, hyp, ev_dir, ctx):
         return CheckResult("false-positive", endpoint, files=files,
                            false_positive_reason="unsigned (alg:none) token was rejected")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_TRACE_RE = re.compile(
+    r"Traceback \(most recent call last\)|File \"[^\"]+\", line \d+|"
+    r"\bat [\w.$]+\([\w.$]+\.\w+:\d+\)|Exception in thread|"
+    r"(?:Fatal error|Warning|Notice):.*on line \d+|org\.\w+(?:\.\w+)+Exception", re.I)
+
+
+@register("INFO-DISCLOSURE", "INFO_DISCLOSURE")
+def check_info_disclosure(session, hyp, ev_dir, ctx):
+    """Verbose errors: malformed input makes the server return a stack trace or framework
+    error, disclosing internals. Confirm by sending junk and matching a trace signature."""
+    endpoint, param = hyp["endpoint"], hyp.get("parameter") or "n"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    control = send("1")
+    bad = send("'\"`<xyz>@%zz")
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "malformed", bad)
+
+    if _TRACE_RE.search(bad.body) and not _TRACE_RE.search(control.body):
+        return CheckResult("confirmed", endpoint, "medium", f"{param}=malformed",
+                           "Malformed input returned a stack trace / framework error "
+                           "disclosing server internals.", files=files)
+    if bad.status in (400, 422) and not _TRACE_RE.search(bad.body):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="malformed input returned a generic error "
+                                                 "with no server internals")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("DIR-LISTING", "DIR_LISTING", "DIRECTORY-LISTING")
+def check_dir_listing(session, hyp, ev_dir, ctx):
+    """Directory listing: a directory path returns an auto-generated index of its files."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "listing", resp)
+    if resp.status == 200 and re.search(r"Index of /|Directory listing for|<title>\s*Index of",
+                                        resp.body, re.I):
+        return CheckResult("confirmed", endpoint, "low", f"GET {endpoint}",
+                           "Directory index is exposed (auto-generated file listing).",
+                           files=files)
+    if resp.status in (401, 403, 404):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"directory access returned {resp.status} "
+                                                 "(listing not exposed)")
+    return CheckResult("unconfirmed", endpoint, files=files)

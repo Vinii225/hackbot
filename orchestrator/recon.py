@@ -31,6 +31,10 @@ CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "creat
 CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
 GRAPHQL_PATH_HINTS = ("graphql", "graphiql", "gql", "graph")
 JWT_PATH_HINTS = ("jwt", "whoami", "token", "session-info")
+INFO_DISCLOSURE_PARAM_HINTS = {"n", "num", "count", "amount", "qty", "quantity", "page",
+                               "limit", "offset", "value", "index"}
+DIR_LISTING_PATH_HINTS = ("files", "uploads", "assets", "static", "backup", "download",
+                          "media", "images")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -234,6 +238,29 @@ def make_hypotheses(crawl) -> list:
                          "class": "JWT", "confidence": "low",
                          "reason": f"{path} authenticates via a bearer token; test whether "
                                    "an unsigned (alg:none) token is accepted.",
+                         "status": "open"})
+
+    # INFO-DISCLOSURE: params that plausibly trigger a server error we can read.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in INFO_DISCLOSURE_PARAM_HINTS \
+                    and ("INFO-DISCLOSURE", ep["path"], p) not in seen:
+                seen.add(("INFO-DISCLOSURE", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "INFO-DISCLOSURE", "confidence": "low",
+                             "reason": f"Parameter '{p}' on {ep['path']} may trigger a verbose "
+                                       "server error on malformed input.",
+                             "status": "open"})
+
+    # DIR-LISTING: directory-like paths that may expose an index.
+    for ep in endpoints:
+        path = ep["path"]
+        if (path.endswith("/") or any(k in path.lower() for k in DIR_LISTING_PATH_HINTS)) \
+                and ("DIR-LISTING", path) not in seen:
+            seen.add(("DIR-LISTING", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "DIR-LISTING", "confidence": "low",
+                         "reason": f"{path} looks like a directory; test for an exposed index.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
