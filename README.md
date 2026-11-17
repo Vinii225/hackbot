@@ -61,7 +61,9 @@ USER → COORDINATOR → RECON → COORDINATOR → VULN-HUNTER → COORDINATOR �
 | Reporter | [`agents/reporter/AGENT.md`](agents/reporter/AGENT.md) | Confirmed findings → `REPORT.md`. |
 
 A **hypothesis** is a guess. A **confirmed finding** requires captured evidence. These are
-never blurred. See [`contracts/`](contracts/) for every inter-agent message schema.
+never blurred. See [`contracts/`](contracts/) for every inter-agent message schema, and
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for the Coordinator loop, the executor seam and how a
+checker is wired end-to-end.
 
 ## Directory layout
 
