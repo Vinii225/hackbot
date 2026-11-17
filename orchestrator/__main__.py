@@ -42,9 +42,23 @@ def _print_prompts(target_dir):
     print("\n\n# REPORT PROMPT\n" + prompts.build_report_prompt(target_dir, []))
 
 
+def _list_classes():
+    from .catalog import CLASS_META, meta_for
+    rows = sorted(CLASS_META)
+    print(f"Supported vulnerability classes: {len(rows)}\n")
+    print(f"  {'CLASS':<18} {'SEVERITY':<9} {'CWE':<9} OWASP")
+    for cls in rows:
+        m = meta_for(cls) or {}
+        print(f"  {cls:<18} {str(m.get('severity')):<9} {str(m.get('cwe')):<9} "
+              f"{m.get('owasp')}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="orchestrator", description="Hackbot Coordinator loop")
-    ap.add_argument("target_dir", help="path to a target dir, e.g. targets/target-example")
+    ap.add_argument("target_dir", nargs="?",
+                    help="path to a target dir, e.g. targets/target-example")
+    ap.add_argument("--list-classes", action="store_true",
+                    help="print the supported vulnerability classes (with CWE/OWASP) and exit")
     ap.add_argument("--mode", choices=["auto", "coop"], default="auto")
     ap.add_argument("--objective", default="Find IDOR and command injection")
     ap.add_argument("--executor", choices=["sim", "llm"], default="sim")
@@ -57,6 +71,12 @@ def main(argv=None):
                     help="optional LLM triage layer (prioritize + explain). Default none "
                          "(deterministic only). 'auto' picks whatever is available.")
     args = ap.parse_args(argv)
+
+    if args.list_classes:
+        _list_classes()
+        return 0
+    if not args.target_dir:
+        ap.error("target_dir is required (unless --list-classes)")
 
     if args.print_prompts:
         _print_prompts(args.target_dir)
