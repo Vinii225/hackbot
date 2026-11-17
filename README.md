@@ -11,7 +11,7 @@ you are explicitly authorized to test.
 
 ## Vulnerability coverage
 
-Twenty-nine vulnerability classes ship as skills, each with a deterministic checker,
+Thirty vulnerability classes ship as skills, each with a deterministic checker,
 vulnerable + safe fixtures and end-to-end tests:
 
 - **IDOR / Broken Access Control** — `agents/vuln-hunter/skills/idor/idor.md`
