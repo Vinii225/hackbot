@@ -23,6 +23,8 @@ CLASS_META = {
              "owasp": "A10:2021 Server-Side Request Forgery", "severity": "high"},
     "CORS": {"title": "CORS Misconfiguration", "cwe": "CWE-942",
              "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
+    "XXE": {"title": "XML External Entity Injection", "cwe": "CWE-611",
+            "owasp": "A05:2021 Security Misconfiguration", "severity": "high"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

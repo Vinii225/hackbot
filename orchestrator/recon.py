@@ -23,6 +23,7 @@ REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "retu
                         "continue", "goto", "to", "out", "forward", "callback"}
 SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "image",
                     "img", "imageurl", "src", "load", "open", "domain", "callback", "site"}
+XXE_PATH_HINTS = ("import", "upload", "xml", "soap", "parse", "ingest", "document", "feed")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -154,6 +155,17 @@ def make_hypotheses(crawl) -> list:
                          "class": "CORS", "confidence": "low",
                          "reason": f"{path} looks like an API endpoint; probe its "
                                    "cross-origin resource sharing policy.",
+                         "status": "open"})
+
+    # XXE: endpoints that look like they ingest an uploaded document / XML body.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in XXE_PATH_HINTS) and ("XXE", path) not in seen:
+            seen.add(("XXE", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "XXE", "confidence": "low",
+                         "reason": f"{path} may parse an uploaded XML document; test for "
+                                   "external entity resolution.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

@@ -24,6 +24,8 @@ Scenarios:
   GET  /safe-fetch?url=         blocks loopback/link-local/private ranges            (SAFE)
   GET  /api/data                CORS: reflects any Origin + allows credentials       (VULN)
   GET  /api/safe-data           CORS: fixed allowlisted origin only                  (SAFE)
+  POST /import                  XXE: XML parser resolves external SYSTEM entities     (VULN)
+  POST /safe-import             XXE: entities not resolved (hardened parser)          (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -63,6 +65,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/redirect?next=/account">Continue</a>
 <a href="/fetch?url=https://example.com/logo.png">Preview</a>
 <a href="/api/data">Data API</a>
+<form action="/import" method="POST"><input name="xml"><button>Import</button></form>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -126,6 +129,24 @@ def _is_internal(host: str) -> bool:
     if host.startswith("169.254.") or host.startswith("127."):
         return True
     return any(host.startswith(f"172.{n}.") for n in range(16, 32))
+
+
+_XXE_ENTITY = re.compile(r'<!ENTITY\s+(\w+)\s+SYSTEM\s+"([^"]+)"\s*>')
+
+
+def _xml_expand(body: str, resolve_entities: bool) -> str:
+    """Emulate an XML parser. When resolve_entities is True, a SYSTEM entity is replaced
+    with the referenced file from the virtual filesystem (the XXE sink); otherwise the
+    reference is left unexpanded (hardened parser). No real file or parser is touched."""
+    entities = {}
+    if resolve_entities:
+        for name, sysid in _XXE_ENTITY.findall(body):
+            entities[name] = VFS.get(sysid.replace("file://", ""), "")
+    out = re.sub(r"<!DOCTYPE.*?\]>", "", body, flags=re.S)
+    out = re.sub(r"<!DOCTYPE[^>]*>", "", out)
+    for name, val in entities.items():
+        out = out.replace(f"&{name};", val)
+    return out.strip()
 
 
 def _fake_fetch(url: str) -> str:
@@ -225,8 +246,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        form = {k: v[0] for k, v in
-                urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
+        raw = self.rfile.read(length).decode()
+        if self.path in ("/import", "/safe-import"):
+            expanded = _xml_expand(raw, resolve_entities=self.path == "/import")
+            return self._send_raw(200, expanded, "application/xml")
+        form = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
         if self.path == "/login":
             u = USERS.get(form.get("username", ""))
             if u and u["password"] == form.get("password"):
