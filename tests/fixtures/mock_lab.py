@@ -30,6 +30,8 @@ Scenarios:
   GET  /safe-reset-link         link built from a fixed canonical host               (SAFE)
   POST /change-email            CSRF: state change accepted with no anti-CSRF token   (VULN)
   POST /safe-change-email       requires a valid csrf token                          (SAFE)
+  GET  /panel                   clickjacking: HTML with no X-Frame-Options           (VULN)
+  GET  /safe-panel              sets X-Frame-Options: DENY                           (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -72,6 +74,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <form action="/import" method="POST"><input name="xml"><button>Import</button></form>
 <a href="/reset-link">Reset password</a>
 <form action="/change-email" method="POST"><input name="email"><button>Save</button></form>
+<a href="/panel">Panel</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -344,6 +347,21 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_raw(200, '<!doctype html><html><body>Password reset: '
                                        '<a href="https://app.example/reset?token=abc123">'
                                        "link</a></body></html>", "text/html")
+
+        if path == "/panel":
+            # VULN: sensitive HTML page served with no anti-framing header.
+            return self._send_raw(200, "<!doctype html><html><body><h1>Account panel</h1>"
+                                       "<button>Delete account</button></body></html>",
+                                  "text/html")
+
+        if path == "/safe-panel":
+            body = (b"<!doctype html><html><body><h1>Account panel</h1></body></html>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("X-Frame-Options", "DENY")  # SAFE: framing denied
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
 
         if path == "/me":
             if not who:

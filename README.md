@@ -22,6 +22,7 @@ you are explicitly authorized to test.
 - **XML External Entity (XXE)** — `agents/vuln-hunter/skills/xxe/xxe.md`
 - **Host Header Injection** — `agents/vuln-hunter/skills/host-header/host-header.md`
 - **Cross-Site Request Forgery (CSRF)** — `agents/vuln-hunter/skills/csrf/csrf.md`
+- **Clickjacking (missing frame protection)** — `agents/vuln-hunter/skills/clickjacking/clickjacking.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 

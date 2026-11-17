@@ -28,6 +28,7 @@ HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "i
                           "link", "activate", "recover")
 CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "create",
                    "transfer", "settings", "profile", "subscribe")
+CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -196,6 +197,19 @@ def make_hypotheses(crawl) -> list:
                          "class": "CSRF", "confidence": "low",
                          "reason": f"{path} is a state-changing POST; test whether it "
                                    "accepts requests without an anti-CSRF token.",
+                         "status": "open"})
+
+    # CLICKJACKING: sensitive-looking GET pages that should refuse to be framed.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "GET" \
+                and any(k in path.lower() for k in CLICKJACKING_PATH_HINTS) \
+                and ("CLICKJACKING", path) not in seen:
+            seen.add(("CLICKJACKING", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "CLICKJACKING", "confidence": "low",
+                         "reason": f"{path} is a sensitive page; test whether it can be "
+                                   "framed (missing X-Frame-Options / CSP frame-ancestors).",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

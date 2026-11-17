@@ -24,7 +24,8 @@
     "cors",
     "xxe",
     "host-header",
-    "csrf"
+    "csrf",
+    "clickjacking"
   ],
   "allowed_tools": [
     "curl",
@@ -44,6 +45,7 @@
     "cors",
     "xxe",
     "host-header",
-    "csrf"
+    "csrf",
+    "clickjacking"
   ]
 }

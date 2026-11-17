@@ -29,6 +29,8 @@ CLASS_META = {
                     "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
     "CSRF": {"title": "Cross-Site Request Forgery", "cwe": "CWE-352",
              "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
+    "CLICKJACKING": {"title": "Clickjacking (missing frame protection)", "cwe": "CWE-1021",
+                     "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

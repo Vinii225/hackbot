@@ -516,3 +516,26 @@ def check_csrf(session, hyp, ev_dir, ctx):
                            false_positive_reason="request without a CSRF token was rejected "
                                                  "(anti-CSRF protection present)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CLICKJACKING")
+def check_clickjacking(session, hyp, ev_dir, ctx):
+    """Clickjacking: an HTML page served with neither X-Frame-Options nor a CSP
+    frame-ancestors directive can be framed by any site and overlaid for UI redress."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "frame-headers", resp)
+    hdrs = {k.lower(): v for k, v in resp.headers.items()}
+    is_html = "html" in hdrs.get("content-type", "").lower()
+    csp = hdrs.get("content-security-policy", "").lower()
+    framed_denied = bool(hdrs.get("x-frame-options")) or "frame-ancestors" in csp
+
+    if resp.status == 200 and is_html and not framed_denied:
+        return CheckResult("confirmed", endpoint, "low", "no X-Frame-Options / frame-ancestors",
+                           "HTML page served without X-Frame-Options or a CSP frame-ancestors "
+                           "directive, so any site can frame it (clickjacking).", files=files)
+    if framed_denied:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="X-Frame-Options or CSP frame-ancestors is "
+                                                 "set (framing denied)")
+    return CheckResult("unconfirmed", endpoint, files=files)
