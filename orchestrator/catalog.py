@@ -37,6 +37,44 @@ CLASS_META = {
             "owasp": "A07:2021 Identification and Authentication Failures", "severity": "high"},
 }
 
+# Concise, class-level remediation guidance surfaced in every report next to the finding.
+REMEDIATION = {
+    "IDOR": "Enforce per-object authorization on every request (check the session owns the "
+            "object); do not rely on unguessable ids.",
+    "CMDI": "Never build OS commands from user input. Call APIs directly, or pass arguments "
+            "as an argv array with no shell; allowlist expected values.",
+    "PATH-TRAVERSAL": "Resolve the final path and confirm it stays within the intended base "
+                      "directory; reject '..' and absolute paths; prefer an id-to-path map.",
+    "XSS": "Contextually output-encode all user data (HTML/attribute/JS) and set a strict "
+           "Content-Security-Policy; prefer framework auto-escaping.",
+    "ACCESS-CONTROL": "Require authentication and authorization on every privileged route by "
+                      "default (deny-by-default); never rely on an unlinked/obscure URL.",
+    "SQLI": "Use parameterized queries / prepared statements for all data access; never "
+            "concatenate input into SQL; apply least-privilege DB accounts.",
+    "SSTI": "Never render user input as a template. Pass it as template data/variables, use "
+            "a logic-less or sandboxed engine, and allowlist any dynamic fields.",
+    "OPEN-REDIRECT": "Do not redirect to user-supplied URLs. Use an allowlist of permitted "
+                     "destinations or relative paths only; validate the host.",
+    "SSRF": "Allowlist outbound hosts, resolve and block private/link-local ranges, disable "
+            "unused URL schemes and redirects, and segment the metadata endpoint.",
+    "CORS": "Reflect only an allowlisted set of trusted origins; never echo arbitrary "
+            "Origins, and never combine a wildcard origin with credentials.",
+    "XXE": "Disable external entities and DTD processing in the XML parser (set secure "
+           "features / FEATURE_SECURE_PROCESSING); prefer JSON where possible.",
+    "HOST-HEADER": "Build absolute URLs from a configured canonical host, not the request "
+                   "Host header; validate Host against an allowlist.",
+    "CSRF": "Require an unpredictable per-session anti-CSRF token on all state-changing "
+            "requests and set SameSite cookies.",
+    "CLICKJACKING": "Send 'X-Frame-Options: DENY' (or a CSP 'frame-ancestors' directive) on "
+                    "sensitive HTML responses.",
+    "GRAPHQL": "Disable introspection in production and enforce authorization and query "
+               "depth/complexity limits on the GraphQL endpoint.",
+    "JWT": "Reject 'alg:none' and pin the expected algorithm; verify the signature with a "
+           "strong secret/key; validate iss/aud/exp.",
+}
+for _cls, _fix in REMEDIATION.items():
+    CLASS_META[_cls]["remediation"] = _fix
+
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
             "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT",
             "HOST_HEADER": "HOST-HEADER"}

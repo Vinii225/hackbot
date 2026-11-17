@@ -55,6 +55,7 @@ def write_report(store) -> dict:
             f"- Proof: {f.get('proof')}",
             f"- Evidence: {evidence.get('dir')} "
             f"({', '.join(evidence.get('files', [])) or 'none'})",
+            f"- Remediation: {meta.get('remediation', 'n/a')}",
         ]
         if f.get("explanation"):
             lines.append(f"- Impact & remediation: {f['explanation']}")

@@ -40,7 +40,8 @@ def _finding_view(f):
     return {"severity": _severity(f), "class": f.get("class"), "endpoint": f.get("endpoint"),
             "cwe": meta.get("cwe"), "owasp": meta.get("owasp"), "method": f.get("method"),
             "parameter": f.get("parameter"), "payload": f.get("payload"),
-            "proof": f.get("proof"), "evidence": f.get("evidence", {})}
+            "proof": f.get("proof"), "remediation": meta.get("remediation"),
+            "evidence": f.get("evidence", {})}
 
 
 def _write(store, name, text):
@@ -96,6 +97,7 @@ def _html_card(x):
             f'<p class="meta">{escape(str(x["cwe"]))} | {escape(str(x["owasp"]))}</p>'
             f'<p><b>Payload:</b> <code>{escape(str(x["payload"]))}</code></p>'
             f'<p><b>Proof:</b> {escape(str(x["proof"]))}</p>'
+            f'<p><b>Remediation:</b> {escape(str(x.get("remediation") or "n/a"))}</p>'
             f'<p class="meta"><b>Evidence:</b> {escape(str(ev.get("dir")))} '
             f'({escape(files)})</p></div>')
 
@@ -141,6 +143,7 @@ def write_docx(store):
             _para(f"Method/Parameter: {x['method']} / {x['parameter']}"),
             _para(f"Payload: {x['payload']}"),
             _para(f"Proof: {x['proof']}"),
+            _para(f"Remediation: {x.get('remediation') or 'n/a'}"),
             _para(f"Evidence: {ev.get('dir')} ({', '.join(ev.get('files', [])) or 'none'})"),
         ]
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
