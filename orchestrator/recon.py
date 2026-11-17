@@ -18,6 +18,9 @@ SQLI_PARAM_HINTS = {"category", "cat", "filter", "sort", "order", "search", "q",
                     "name", "product", "productid", "id", "user", "username", "email"}
 SSTI_PARAM_HINTS = {"name", "template", "greeting", "preview", "content", "subject",
                     "title", "message", "body", "text"}
+REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "return",
+                        "returnurl", "return_url", "returnto", "dest", "destination",
+                        "continue", "goto", "to", "out", "forward", "callback"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -116,6 +119,17 @@ def make_hypotheses(crawl) -> list:
                              "class": "SSTI", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may be rendered by a "
                                        "server-side template engine.",
+                             "status": "open"})
+
+    # OPEN-REDIRECT: params that plausibly set a redirect destination.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in REDIRECT_PARAM_HINTS and ("OPEN-REDIRECT", ep["path"], p) not in seen:
+                seen.add(("OPEN-REDIRECT", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "OPEN-REDIRECT", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may control a "
+                                       "redirect destination.",
                              "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

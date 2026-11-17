@@ -17,10 +17,12 @@ CLASS_META = {
              "owasp": "A03:2021 Injection", "severity": "high"},
     "SSTI": {"title": "Server-Side Template Injection", "cwe": "CWE-1336",
              "owasp": "A03:2021 Injection", "severity": "high"},
+    "OPEN-REDIRECT": {"title": "Open Redirect", "cwe": "CWE-601",
+                      "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
-            "ACCESS_CONTROL": "ACCESS-CONTROL"}
+            "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT"}
 
 
 def meta_for(cls):

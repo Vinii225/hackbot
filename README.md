@@ -16,6 +16,7 @@ you are explicitly authorized to test.
 - **Broken Access Control** (unauthenticated privileged access) — `agents/vuln-hunter/skills/access-control/access-control.md`
 - **SQL Injection** (error / boolean / time-based) — `agents/vuln-hunter/skills/sqli/sqli.md`
 - **Server-Side Template Injection** — `agents/vuln-hunter/skills/ssti/ssti.md`
+- **Open Redirect** — `agents/vuln-hunter/skills/open-redirect/open-redirect.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 

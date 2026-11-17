@@ -6,7 +6,7 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from tools.httpx import Session, save_evidence
 
@@ -333,4 +333,43 @@ def check_ssti(session, hyp, ev_dir, ctx):
         return CheckResult("false-positive", endpoint, files=files,
                            false_positive_reason="template payload reflected literally or "
                                                  "encoded, not evaluated as an expression")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_REDIRECT_CODES = {301, 302, 303, 307, 308}
+
+
+@register("OPEN-REDIRECT", "OPEN_REDIRECT")
+def check_open_redirect(session, hyp, ev_dir, ctx):
+    """Open redirect: a destination parameter sends the browser to an attacker-controlled
+    host. The client never follows the 3xx (allow_redirects=False), so the Location header
+    is read without leaving scope; the marker host (.example) is never contacted."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    method = hyp.get("method", "GET").upper()
+    marker = "evil-" + secrets.token_hex(3) + ".example"
+    payloads = [f"https://{marker}/hb", f"//{marker}/hb"]
+
+    def send(value):
+        if method == "POST":
+            return session.post(endpoint, data={param: value}, allow_redirects=False)
+        return session.get(endpoint + "?" + urlencode({param: value}), allow_redirects=False)
+
+    files, saw_redirect, last = [], False, None
+    for i, payload in enumerate(payloads):
+        resp = send(payload)
+        last = resp
+        files += save_evidence(ev_dir, f"redirect-probe-{i}", resp)
+        location = next((v for k, v in resp.headers.items() if k.lower() == "location"), "")
+        if resp.status in _REDIRECT_CODES:
+            saw_redirect = True
+            host = urlparse(location).netloc or urlparse("//" + location.lstrip("/")).netloc
+            if host == marker:
+                return CheckResult("confirmed", endpoint, "medium", f"{param}={payload}",
+                                   f"Redirect sent to attacker-controlled host "
+                                   f"(Location: {location}).", files=files)
+
+    if saw_redirect:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="redirect destination validated or confined "
+                                                 "to the same site (no off-site Location)")
     return CheckResult("unconfirmed", endpoint, files=files)

@@ -18,7 +18,8 @@
     "xss",
     "access-control",
     "sqli",
-    "ssti"
+    "ssti",
+    "open-redirect"
   ],
   "allowed_tools": [
     "curl",
@@ -32,6 +33,7 @@
     "xss",
     "access-control",
     "sqli",
-    "ssti"
+    "ssti",
+    "open-redirect"
   ]
 }
