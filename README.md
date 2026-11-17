@@ -124,6 +124,9 @@ python -m orchestrator targets/target-example --executor llm --mode coop
 
 # Inspect the prompts the llm executor would send, without calling any model:
 python -m orchestrator targets/target-example --print-prompts
+
+# List every supported vulnerability class (CWE/OWASP), no target needed:
+python -m orchestrator --list-classes
 ```
 
 - `--executor sim` with `--sim <scenario.json>` replays a scenario with
