@@ -23,7 +23,8 @@
     "ssrf",
     "cors",
     "xxe",
-    "host-header"
+    "host-header",
+    "csrf"
   ],
   "allowed_tools": [
     "curl",
@@ -42,6 +43,7 @@
     "ssrf",
     "cors",
     "xxe",
-    "host-header"
+    "host-header",
+    "csrf"
   ]
 }

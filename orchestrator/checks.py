@@ -492,3 +492,27 @@ def check_host_header(session, hyp, ev_dir, ctx):
                            false_positive_reason="response uses a fixed canonical host, not "
                                                  "the request Host header")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CSRF")
+def check_csrf(session, hyp, ev_dir, ctx):
+    """CSRF: a state-changing request is accepted with no unpredictable anti-CSRF token, so
+    another site can forge it using the victim's cookies. Confirm by submitting the change
+    without any token; a rejection (token required) is a false positive."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "email"
+    marker = "hb" + secrets.token_hex(3) + "@evil.example"
+
+    resp = session.post(endpoint, data={param: marker})  # deliberately no CSRF token
+    files = save_evidence(ev_dir, "no-token", resp)
+    body = (resp.body or "").lower()
+
+    if resp.status == 200 and marker in (resp.body or ""):
+        return CheckResult("confirmed", endpoint, "medium", f"POST {param}={marker} (no token)",
+                           "State change was accepted without any anti-CSRF token, so it can "
+                           "be forged cross-site using the victim's session.", files=files)
+    if resp.status in (400, 403) or "csrf" in body or "token" in body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="request without a CSRF token was rejected "
+                                                 "(anti-CSRF protection present)")
+    return CheckResult("unconfirmed", endpoint, files=files)

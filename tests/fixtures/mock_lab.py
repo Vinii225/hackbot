@@ -28,6 +28,8 @@ Scenarios:
   POST /safe-import             XXE: entities not resolved (hardened parser)          (SAFE)
   GET  /reset-link              Host header injection: Host reflected into a link     (VULN)
   GET  /safe-reset-link         link built from a fixed canonical host               (SAFE)
+  POST /change-email            CSRF: state change accepted with no anti-CSRF token   (VULN)
+  POST /safe-change-email       requires a valid csrf token                          (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -69,6 +71,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/api/data">Data API</a>
 <form action="/import" method="POST"><input name="xml"><button>Import</button></form>
 <a href="/reset-link">Reset password</a>
+<form action="/change-email" method="POST"><input name="email"><button>Save</button></form>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -263,6 +266,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/feedback":
             # SAFE: input is treated as data and echoed back; never shelled out.
             return self._send(200, {"received": form.get("message", "")})
+        if self.path == "/change-email":
+            # VULN: no anti-CSRF token required for a state-changing request.
+            return self._send(200, {"changed": form.get("email", "")})
+        if self.path == "/safe-change-email":
+            if not form.get("csrf"):
+                return self._send(403, {"error": "csrf token required"})  # SAFE
+            return self._send(200, {"changed": form.get("email", "")})
         self._send(404, {"error": "not found"})
 
     def do_GET(self):

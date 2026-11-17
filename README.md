@@ -21,6 +21,7 @@ you are explicitly authorized to test.
 - **CORS Misconfiguration** — `agents/vuln-hunter/skills/cors/cors.md`
 - **XML External Entity (XXE)** — `agents/vuln-hunter/skills/xxe/xxe.md`
 - **Host Header Injection** — `agents/vuln-hunter/skills/host-header/host-header.md`
+- **Cross-Site Request Forgery (CSRF)** — `agents/vuln-hunter/skills/csrf/csrf.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -176,5 +177,5 @@ to the target.
 
 ## Roadmap (future skills, not in MVP)
 
-JWT · GraphQL · CSRF — each added as a new
+JWT · GraphQL — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.

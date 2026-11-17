@@ -26,6 +26,8 @@ SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "
 XXE_PATH_HINTS = ("import", "upload", "xml", "soap", "parse", "ingest", "document", "feed")
 HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "invite",
                           "link", "activate", "recover")
+CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "create",
+                   "transfer", "settings", "profile", "subscribe")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -181,6 +183,19 @@ def make_hypotheses(crawl) -> list:
                          "class": "HOST-HEADER", "confidence": "low",
                          "reason": f"{path} may embed the request Host in a generated link; "
                                    "test Host header injection.",
+                         "status": "open"})
+
+    # CSRF: state-changing POST endpoints whose anti-CSRF protection is worth testing.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "POST" and any(k in path.lower() for k in CSRF_PATH_HINTS) \
+                and ("CSRF", path) not in seen:
+            seen.add(("CSRF", path))
+            hyps.append({"endpoint": path, "method": "POST",
+                         "parameter": (ep["params"][0] if ep["params"] else None),
+                         "class": "CSRF", "confidence": "low",
+                         "reason": f"{path} is a state-changing POST; test whether it "
+                                   "accepts requests without an anti-CSRF token.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

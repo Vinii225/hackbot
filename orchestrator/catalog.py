@@ -27,6 +27,8 @@ CLASS_META = {
             "owasp": "A05:2021 Security Misconfiguration", "severity": "high"},
     "HOST-HEADER": {"title": "Host Header Injection", "cwe": "CWE-644",
                     "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
+    "CSRF": {"title": "Cross-Site Request Forgery", "cwe": "CWE-352",
+             "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
