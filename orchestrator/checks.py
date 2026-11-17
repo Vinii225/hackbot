@@ -373,3 +373,35 @@ def check_open_redirect(session, hyp, ev_dir, ctx):
                            false_positive_reason="redirect destination validated or confined "
                                                  "to the same site (no off-site Location)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+# Distinctive strings a cloud instance-metadata endpoint returns; strong SSRF signal.
+_METADATA_MARKERS = ("iam/security-credentials", "ami-id", "instance-id")
+
+
+@register("SSRF")
+def check_ssrf(session, hyp, ev_dir, ctx):
+    """Server-side request forgery: the server fetches a URL the client supplies. Probe the
+    cloud instance-metadata address; confirm when its distinctive content comes back,
+    absent from a benign external control. The scanner's client only ever talks to the
+    in-scope target — the metadata address is a string in the parameter, never contacted
+    by us."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    control = send("https://example.com/")
+    probe = send("http://169.254.169.254/latest/meta-data/")
+    files = save_evidence(ev_dir, "control-external", control)
+    files += save_evidence(ev_dir, "probe-metadata", probe)
+
+    hit = [m for m in _METADATA_MARKERS if m in probe.body and m not in control.body]
+    if hit:
+        return CheckResult("confirmed", endpoint, "high",
+                           f"{param}=http://169.254.169.254/latest/meta-data/",
+                           f"Server fetched the cloud metadata endpoint; response carried "
+                           f"internal-only content ({', '.join(hit)}).", files=files)
+    if probe.status in (400, 403) and control.status == 200:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="internal/link-local address blocked while "
+                                                 "an external URL is allowed")
+    return CheckResult("unconfirmed", endpoint, files=files)

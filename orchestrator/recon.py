@@ -21,6 +21,8 @@ SSTI_PARAM_HINTS = {"name", "template", "greeting", "preview", "content", "subje
 REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "return",
                         "returnurl", "return_url", "returnto", "dest", "destination",
                         "continue", "goto", "to", "out", "forward", "callback"}
+SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "image",
+                    "img", "imageurl", "src", "load", "open", "domain", "callback", "site"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -130,6 +132,17 @@ def make_hypotheses(crawl) -> list:
                              "class": "OPEN-REDIRECT", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may control a "
                                        "redirect destination.",
+                             "status": "open"})
+
+    # SSRF: params that plausibly make the server fetch a URL.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in SSRF_PARAM_HINTS and ("SSRF", ep["path"], p) not in seen:
+                seen.add(("SSRF", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "SSRF", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may make the server "
+                                       "fetch a URL it controls.",
                              "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
