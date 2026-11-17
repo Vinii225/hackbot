@@ -18,6 +18,27 @@ SQLI_PARAM_HINTS = {"category", "cat", "filter", "sort", "order", "search", "q",
                     "name", "product", "productid", "id", "user", "username", "email"}
 SSTI_PARAM_HINTS = {"name", "template", "greeting", "preview", "content", "subject",
                     "title", "message", "body", "text"}
+REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "return",
+                        "returnurl", "return_url", "returnto", "dest", "destination",
+                        "continue", "goto", "to", "out", "forward", "callback"}
+SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "image",
+                    "img", "imageurl", "src", "load", "open", "domain", "callback", "site"}
+XXE_PATH_HINTS = ("import", "upload", "xml", "soap", "parse", "ingest", "document", "feed")
+HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "invite",
+                          "link", "activate", "recover")
+CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "create",
+                   "transfer", "settings", "profile", "subscribe")
+CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
+GRAPHQL_PATH_HINTS = ("graphql", "graphiql", "gql", "graph")
+JWT_PATH_HINTS = ("jwt", "whoami", "token", "session-info")
+INFO_DISCLOSURE_PARAM_HINTS = {"n", "num", "count", "amount", "qty", "quantity", "page",
+                               "limit", "offset", "value", "index"}
+DIR_LISTING_PATH_HINTS = ("files", "uploads", "assets", "static", "backup", "download",
+                          "media", "images")
+LDAP_PATH_HINTS = ("ldap", "directory-login", "ad-login")
+MASS_ASSIGN_PATH_HINTS = ("update", "profile", "account", "register", "signup", "user")
+USER_ENUM_PATH_HINTS = ("login", "signin", "sign-in", "authenticate", "forgot", "reset")
+PROTO_POLLUTION_PATH_HINTS = ("merge", "config", "settings", "preferences", "patch")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -117,6 +138,181 @@ def make_hypotheses(crawl) -> list:
                              "reason": f"Parameter '{p}' on {ep['path']} may be rendered by a "
                                        "server-side template engine.",
                              "status": "open"})
+
+    # OPEN-REDIRECT: params that plausibly set a redirect destination.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in REDIRECT_PARAM_HINTS and ("OPEN-REDIRECT", ep["path"], p) not in seen:
+                seen.add(("OPEN-REDIRECT", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "OPEN-REDIRECT", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may control a "
+                                       "redirect destination.",
+                             "status": "open"})
+
+    # SSRF: params that plausibly make the server fetch a URL.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in SSRF_PARAM_HINTS and ("SSRF", ep["path"], p) not in seen:
+                seen.add(("SSRF", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "SSRF", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may make the server "
+                                       "fetch a URL it controls.",
+                             "status": "open"})
+
+    # CORS: API-ish endpoints whose cross-origin policy is worth probing.
+    for ep in endpoints:
+        path = ep["path"]
+        if "api" in path.lower() and ("CORS", path) not in seen:
+            seen.add(("CORS", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "CORS", "confidence": "low",
+                         "reason": f"{path} looks like an API endpoint; probe its "
+                                   "cross-origin resource sharing policy.",
+                         "status": "open"})
+
+    # XXE: endpoints that look like they ingest an uploaded document / XML body.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in XXE_PATH_HINTS) and ("XXE", path) not in seen:
+            seen.add(("XXE", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "XXE", "confidence": "low",
+                         "reason": f"{path} may parse an uploaded XML document; test for "
+                                   "external entity resolution.",
+                         "status": "open"})
+
+    # HOST-HEADER: endpoints that build absolute links (reset/verify mails) from the
+    # request Host, which an attacker can set.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in HOST_HEADER_PATH_HINTS) \
+                and ("HOST-HEADER", path) not in seen:
+            seen.add(("HOST-HEADER", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "HOST-HEADER", "confidence": "low",
+                         "reason": f"{path} may embed the request Host in a generated link; "
+                                   "test Host header injection.",
+                         "status": "open"})
+
+    # CSRF: state-changing POST endpoints whose anti-CSRF protection is worth testing.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "POST" and any(k in path.lower() for k in CSRF_PATH_HINTS) \
+                and ("CSRF", path) not in seen:
+            seen.add(("CSRF", path))
+            hyps.append({"endpoint": path, "method": "POST",
+                         "parameter": (ep["params"][0] if ep["params"] else None),
+                         "class": "CSRF", "confidence": "low",
+                         "reason": f"{path} is a state-changing POST; test whether it "
+                                   "accepts requests without an anti-CSRF token.",
+                         "status": "open"})
+
+    # CLICKJACKING: sensitive-looking GET pages that should refuse to be framed.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "GET" \
+                and any(k in path.lower() for k in CLICKJACKING_PATH_HINTS) \
+                and ("CLICKJACKING", path) not in seen:
+            seen.add(("CLICKJACKING", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "CLICKJACKING", "confidence": "low",
+                         "reason": f"{path} is a sensitive page; test whether it can be "
+                                   "framed (missing X-Frame-Options / CSP frame-ancestors).",
+                         "status": "open"})
+
+    # GRAPHQL: endpoints that look like a GraphQL API; test introspection.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in GRAPHQL_PATH_HINTS) and ("GRAPHQL", path) not in seen:
+            seen.add(("GRAPHQL", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "GRAPHQL", "confidence": "low",
+                         "reason": f"{path} looks like a GraphQL endpoint; test whether "
+                                   "schema introspection is exposed.",
+                         "status": "open"})
+
+    # JWT: endpoints that authenticate via a bearer token; test alg:none forgery.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in JWT_PATH_HINTS) and ("JWT", path) not in seen:
+            seen.add(("JWT", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "JWT", "confidence": "low",
+                         "reason": f"{path} authenticates via a bearer token; test whether "
+                                   "an unsigned (alg:none) token is accepted.",
+                         "status": "open"})
+
+    # INFO-DISCLOSURE: params that plausibly trigger a server error we can read.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in INFO_DISCLOSURE_PARAM_HINTS \
+                    and ("INFO-DISCLOSURE", ep["path"], p) not in seen:
+                seen.add(("INFO-DISCLOSURE", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "INFO-DISCLOSURE", "confidence": "low",
+                             "reason": f"Parameter '{p}' on {ep['path']} may trigger a verbose "
+                                       "server error on malformed input.",
+                             "status": "open"})
+
+    # DIR-LISTING: directory-like paths that may expose an index.
+    for ep in endpoints:
+        path = ep["path"]
+        if (path.endswith("/") or any(k in path.lower() for k in DIR_LISTING_PATH_HINTS)) \
+                and ("DIR-LISTING", path) not in seen:
+            seen.add(("DIR-LISTING", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "DIR-LISTING", "confidence": "low",
+                         "reason": f"{path} looks like a directory; test for an exposed index.",
+                         "status": "open"})
+
+    # LDAPI: login/search endpoints backed by an LDAP filter.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in LDAP_PATH_HINTS) and ("LDAPI", path) not in seen:
+            seen.add(("LDAPI", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "user"),
+                         "class": "LDAPI", "confidence": "medium",
+                         "reason": f"{path} looks LDAP-backed; test filter injection.",
+                         "status": "open"})
+
+    # MASS-ASSIGNMENT: object-update POSTs that may bind privileged fields.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "POST" \
+                and any(k in path.lower() for k in MASS_ASSIGN_PATH_HINTS) \
+                and ("MASS-ASSIGNMENT", path) not in seen:
+            seen.add(("MASS-ASSIGNMENT", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "MASS-ASSIGNMENT", "confidence": "low",
+                         "reason": f"{path} updates an object; test binding a privileged "
+                                   "field (role).",
+                         "status": "open"})
+
+    # USER-ENUM: authentication endpoints that may reveal which usernames exist.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in USER_ENUM_PATH_HINTS) \
+                and ("USER-ENUM", path) not in seen:
+            seen.add(("USER-ENUM", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "USER-ENUM", "confidence": "low",
+                         "reason": f"{path} authenticates users; test for a valid/invalid "
+                                   "username oracle.",
+                         "status": "open"})
+
+    # PROTO-POLLUTION: JSON-merge endpoints that may honor __proto__.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in PROTO_POLLUTION_PATH_HINTS) \
+                and ("PROTO-POLLUTION", path) not in seen:
+            seen.add(("PROTO-POLLUTION", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "PROTO-POLLUTION", "confidence": "low",
+                         "reason": f"{path} merges client JSON; test __proto__ pollution.",
+                         "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
     # that should test anonymous access.

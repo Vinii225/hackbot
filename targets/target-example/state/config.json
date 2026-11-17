@@ -18,7 +18,22 @@
     "xss",
     "access-control",
     "sqli",
-    "ssti"
+    "ssti",
+    "open-redirect",
+    "ssrf",
+    "cors",
+    "xxe",
+    "host-header",
+    "csrf",
+    "clickjacking",
+    "graphql",
+    "jwt",
+    "info-disclosure",
+    "dir-listing",
+    "ldapi",
+    "mass-assignment",
+    "user-enum",
+    "proto-pollution"
   ],
   "allowed_tools": [
     "curl",
@@ -32,6 +47,21 @@
     "xss",
     "access-control",
     "sqli",
-    "ssti"
+    "ssti",
+    "open-redirect",
+    "ssrf",
+    "cors",
+    "xxe",
+    "host-header",
+    "csrf",
+    "clickjacking",
+    "graphql",
+    "jwt",
+    "info-disclosure",
+    "dir-listing",
+    "ldapi",
+    "mass-assignment",
+    "user-enum",
+    "proto-pollution"
   ]
 }

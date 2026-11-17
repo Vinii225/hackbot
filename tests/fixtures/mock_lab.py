@@ -18,6 +18,36 @@ Scenarios:
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
   GET  /greeting?name=          server-side template injection (expr evaluated)       (VULN)
   GET  /safe-greeting?name=     input rendered as literal text, auto-escaped          (SAFE)
+  GET  /redirect?next=          open redirect: 302 to any destination, unchecked      (VULN)
+  GET  /safe-redirect?next=     only same-site relative paths allowed                 (SAFE)
+  GET  /fetch?url=              SSRF: server fetches any url, incl. internal/metadata   (VULN)
+  GET  /safe-fetch?url=         blocks loopback/link-local/private ranges            (SAFE)
+  GET  /api/data                CORS: reflects any Origin + allows credentials       (VULN)
+  GET  /api/safe-data           CORS: fixed allowlisted origin only                  (SAFE)
+  POST /import                  XXE: XML parser resolves external SYSTEM entities     (VULN)
+  POST /safe-import             XXE: entities not resolved (hardened parser)          (SAFE)
+  GET  /reset-link              Host header injection: Host reflected into a link     (VULN)
+  GET  /safe-reset-link         link built from a fixed canonical host               (SAFE)
+  POST /change-email            CSRF: state change accepted with no anti-CSRF token   (VULN)
+  POST /safe-change-email       requires a valid csrf token                          (SAFE)
+  GET  /panel                   clickjacking: HTML with no X-Frame-Options           (VULN)
+  GET  /safe-panel              sets X-Frame-Options: DENY                           (SAFE)
+  POST /graphql                 GraphQL introspection enabled (schema disclosed)     (VULN)
+  POST /safe-graphql            introspection disabled                               (SAFE)
+  GET  /api/jwt-whoami          JWT: accepts unsigned alg:none bearer tokens         (VULN)
+  GET  /api/safe-jwt-whoami     rejects unsigned tokens                              (SAFE)
+  GET  /compute?n=              verbose error: stack trace on malformed input         (VULN)
+  GET  /safe-compute?n=         generic error on bad input                           (SAFE)
+  GET  /files/                  directory listing (auto index) exposed               (VULN)
+  GET  /safe-files/             directory access forbidden (403)                     (SAFE)
+  GET  /ldap-login?login=       LDAP injection: filter metachars alter the query     (VULN)
+  GET  /safe-ldap-login?login=  LDAP metacharacters escaped                          (SAFE)
+  POST /update-profile          mass assignment: binds a privileged role field       (VULN)
+  POST /safe-update-profile     role field ignored                                   (SAFE)
+  POST /login-verbose           username enumeration: distinct valid/invalid replies (VULN)
+  POST /safe-login-verbose      uniform invalid-credentials reply                    (SAFE)
+  POST /merge                   prototype pollution: honors __proto__ in merge        (VULN)
+  POST /safe-merge              strips __proto__/constructor keys                     (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -29,6 +59,7 @@ whoami, id) so injection is observable deterministically without any real execut
 """
 from __future__ import annotations
 
+import base64
 import html
 import json
 import posixpath
@@ -54,6 +85,21 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/download?file=welcome.txt">Download welcome</a>
 <a href="/search?q=test">Search</a>
 <a href="/greeting?name=friend">Greeting</a>
+<a href="/redirect?next=/account">Continue</a>
+<a href="/fetch?url=https://example.com/logo.png">Preview</a>
+<a href="/api/data">Data API</a>
+<form action="/import" method="POST"><input name="xml"><button>Import</button></form>
+<a href="/reset-link">Reset password</a>
+<form action="/change-email" method="POST"><input name="email"><button>Save</button></form>
+<a href="/panel">Panel</a>
+<a href="/graphql">GraphQL API</a>
+<a href="/api/jwt-whoami">Who am I</a>
+<a href="/compute?n=5">Compute</a>
+<a href="/files/">Files</a>
+<a href="/ldap-login?login=admin">LDAP login</a>
+<a href="/merge">Merge config</a>
+<form action="/update-profile" method="POST"><input name="name"><button>Update</button></form>
+<form action="/login-verbose" method="POST"><input name="username"><input name="password"><button>Go</button></form>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -97,6 +143,86 @@ APP_JS = """// account widget
 fetch('/me').then(r=>r.json()).then(u=>{ fetch('/api/user/'+u.id); });
 function ping(h){ return fetch('/ping?host='+encodeURIComponent(h)); }
 """
+
+
+# Emulated cloud instance-metadata response (the SSRF prize). Served ONLY to requests
+# the fixture "fetches" on the attacker's behalf, never to a direct client request.
+METADATA_DOC = ("ami-id: ami-0ff8e1\n"
+                "instance-id: i-0abc123def\n"
+                "iam/security-credentials/: app-emr-role\n")
+_INTERNAL_HOSTS = {"169.254.169.254", "127.0.0.1", "localhost", "0.0.0.0", "metadata"}
+
+
+def _url_host(url: str) -> str:
+    return urllib.parse.urlparse(url if "://" in url else "//" + url).hostname or ""
+
+
+def _is_internal(host: str) -> bool:
+    if host in _INTERNAL_HOSTS or host.startswith("10.") or host.startswith("192.168."):
+        return True
+    if host.startswith("169.254.") or host.startswith("127."):
+        return True
+    return any(host.startswith(f"172.{n}.") for n in range(16, 32))
+
+
+_XXE_ENTITY = re.compile(r'<!ENTITY\s+(\w+)\s+SYSTEM\s+"([^"]+)"\s*>')
+
+
+def _xml_expand(body: str, resolve_entities: bool) -> str:
+    """Emulate an XML parser. When resolve_entities is True, a SYSTEM entity is replaced
+    with the referenced file from the virtual filesystem (the XXE sink); otherwise the
+    reference is left unexpanded (hardened parser). No real file or parser is touched."""
+    entities = {}
+    if resolve_entities:
+        for name, sysid in _XXE_ENTITY.findall(body):
+            entities[name] = VFS.get(sysid.replace("file://", ""), "")
+    out = re.sub(r"<!DOCTYPE.*?\]>", "", body, flags=re.S)
+    out = re.sub(r"<!DOCTYPE[^>]*>", "", out)
+    for name, val in entities.items():
+        out = out.replace(f"&{name};", val)
+    return out.strip()
+
+
+def _decode_jwt(token: str):
+    """Best-effort JWT decode for the fixture: returns (header, payload) dicts or (None, None).
+    Does not verify signatures — that is exactly the point of the alg:none scenario."""
+    try:
+        header_b64, payload_b64 = token.split(".")[:2]
+        def d(seg):
+            return json.loads(base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4)))
+        return d(header_b64), d(payload_b64)
+    except Exception:
+        return None, None
+
+
+def _fake_ldap(value: str, escape: bool):
+    """Emulate `(&(uid=<value>)...)`. Unescaped filter metacharacters ( ) * | break out of
+    the clause and match every record; escaping neutralizes them. No real LDAP is used."""
+    if escape:
+        value = re.sub(r"[*()|&]", "", value)
+    if not escape and (")(" in value or "*" in value):
+        return list(USERS)                       # injection -> all records
+    return [value] if value in USERS else []
+
+
+def _merge(target: dict, src: dict, safe: bool):
+    """Recursive dict merge. When safe, dangerous keys are skipped (no prototype pollution)."""
+    for k, v in src.items():
+        if safe and k in ("__proto__", "constructor", "prototype"):
+            continue
+        if isinstance(v, dict) and isinstance(target.get(k), dict):
+            _merge(target[k], v, safe)
+        else:
+            target[k] = v
+    return target
+
+
+def _fake_fetch(url: str) -> str:
+    """Emulate a server that fetches `url`. Internal/metadata targets leak internal content;
+    nothing on the real network is contacted."""
+    if _url_host(url) == "169.254.169.254":
+        return METADATA_DOC
+    return json.dumps({"fetched": url, "body": "external content"})
 
 
 def _fake_shell(cmd: str) -> str:
@@ -180,10 +306,39 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        form = {k: v[0] for k, v in
-                urllib.parse.parse_qs(self.rfile.read(length).decode()).items()}
+        raw = self.rfile.read(length).decode()
+        if self.path in ("/import", "/safe-import"):
+            expanded = _xml_expand(raw, resolve_entities=self.path == "/import")
+            return self._send_raw(200, expanded, "application/xml")
+        if self.path in ("/merge", "/safe-merge"):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            merged = _merge({}, payload, safe=self.path == "/safe-merge")
+            proto = merged.get("__proto__") if isinstance(merged.get("__proto__"), dict) else {}
+            return self._send(200, {"merged": True, "polluted": proto.get("hbflag")})
+        if self.path in ("/graphql", "/safe-graphql"):
+            try:
+                query = json.loads(raw).get("query", "")
+            except json.JSONDecodeError:
+                query = ""
+            if "__schema" in query:
+                if self.path == "/graphql":  # VULN: introspection exposed
+                    return self._send(200, {"data": {"__schema": {
+                        "queryType": {"name": "Query"},
+                        "types": [{"name": "User"}, {"name": "Query"}]}}})
+                return self._send(400, {"errors": [{"message": "introspection is disabled"}]})
+            return self._send(200, {"data": {}})
+        form = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
         if self.path == "/login":
             u = USERS.get(form.get("username", ""))
             if u and u["password"] == form.get("password"):
@@ -193,6 +348,28 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/feedback":
             # SAFE: input is treated as data and echoed back; never shelled out.
             return self._send(200, {"received": form.get("message", "")})
+        if self.path in ("/update-profile", "/safe-update-profile"):
+            # VULN binds any field sent (incl. role); SAFE ignores the privileged field.
+            role = form.get("role", "user") if self.path == "/update-profile" else "user"
+            return self._send(200, {"name": form.get("name", ""), "role": role})
+        if self.path in ("/login-verbose", "/safe-login-verbose"):
+            u = USERS.get(form.get("username", ""))
+            if self.path == "/safe-login-verbose":
+                ok = u and u["password"] == form.get("password")
+                return self._send(200 if ok else 401,
+                                  {"login": "ok"} if ok else {"error": "invalid credentials"})
+            if not u:                                   # VULN: distinct messages
+                return self._send(401, {"error": "user not found"})
+            if u["password"] != form.get("password"):
+                return self._send(401, {"error": "incorrect password"})
+            return self._send(200, {"login": "ok"})
+        if self.path == "/change-email":
+            # VULN: no anti-CSRF token required for a state-changing request.
+            return self._send(200, {"changed": form.get("email", "")})
+        if self.path == "/safe-change-email":
+            if not form.get("csrf"):
+                return self._send(403, {"error": "csrf token required"})  # SAFE
+            return self._send(200, {"changed": form.get("email", "")})
         self._send(404, {"error": "not found"})
 
     def do_GET(self):
@@ -231,6 +408,92 @@ class _Handler(BaseHTTPRequestHandler):
             if user:
                 DELETED.add(user)  # state change: a scanner must never trigger this in recon
             return self._send(200, {"deleted": user})
+
+        if path == "/api/data":
+            body = json.dumps({"data": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            origin = self.headers.get("Origin")
+            if origin:  # VULN: reflects any Origin and allows credentials
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Credentials", "true")
+            self.end_headers()
+            return self.wfile.write(body)
+
+        if path == "/api/safe-data":
+            body = json.dumps({"data": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            # SAFE: a single fixed allowlisted origin, never the caller's Origin
+            self.send_header("Access-Control-Allow-Origin", "https://app.example")
+            self.end_headers()
+            return self.wfile.write(body)
+
+        if path == "/reset-link":
+            host = self.headers.get("Host", "")
+            # VULN: absolute link built from the attacker-controlled Host header.
+            return self._send_raw(200, '<!doctype html><html><body>Password reset: '
+                                       f'<a href="https://{host}/reset?token=abc123">link'
+                                       "</a></body></html>", "text/html")
+
+        if path == "/safe-reset-link":
+            # SAFE: link always built from a fixed canonical host.
+            return self._send_raw(200, '<!doctype html><html><body>Password reset: '
+                                       '<a href="https://app.example/reset?token=abc123">'
+                                       "link</a></body></html>", "text/html")
+
+        if path == "/panel":
+            # VULN: sensitive HTML page served with no anti-framing header.
+            return self._send_raw(200, "<!doctype html><html><body><h1>Account panel</h1>"
+                                       "<button>Delete account</button></body></html>",
+                                  "text/html")
+
+        if path == "/safe-panel":
+            body = (b"<!doctype html><html><body><h1>Account panel</h1></body></html>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("X-Frame-Options", "DENY")  # SAFE: framing denied
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
+
+        if path in ("/api/jwt-whoami", "/api/safe-jwt-whoami"):
+            auth = self.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            header, payload = _decode_jwt(token)
+            if header and header.get("alg") == "none":
+                if path == "/api/jwt-whoami":  # VULN: trusts an unsigned token
+                    return self._send(200, {"user": payload.get("user"),
+                                            "role": payload.get("role")})
+                return self._send(401, {"error": "unsigned tokens rejected"})  # SAFE
+            return self._send(401, {"error": "invalid token"})
+
+        if path in ("/compute", "/safe-compute"):
+            n = self._query().get("n", "")
+            try:
+                return self._send(200, {"result": int(n) * 2})
+            except ValueError:
+                if path == "/safe-compute":
+                    return self._send(400, {"error": "invalid input"})  # SAFE: generic
+                tb = ('Traceback (most recent call last):\n'
+                      '  File "/app/views.py", line 42, in compute\n'
+                      '    return int(n) * 2\n'
+                      f'ValueError: invalid literal for int() with base 10: {n!r}')
+                return self._send_raw(500, tb, "text/plain")  # VULN: stack trace leaked
+
+        if path in ("/files", "/files/"):
+            return self._send_raw(200, "<html><head><title>Index of /files</title></head>"
+                                       "<body><h1>Index of /files</h1><ul>"
+                                       '<li><a href="welcome.txt">welcome.txt</a></li>'
+                                       '<li><a href="backup.zip">backup.zip</a></li>'
+                                       "</ul></body></html>", "text/html")  # VULN
+        if path in ("/safe-files", "/safe-files/"):
+            return self._send(403, {"error": "forbidden"})  # SAFE: no listing
+
+        if path in ("/ldap-login", "/safe-ldap-login"):
+            value = self._query().get("login", "")
+            found = _fake_ldap(value, escape=path == "/safe-ldap-login")
+            return self._send(200, {"users": found})
 
         if path == "/me":
             if not who:
@@ -331,6 +594,27 @@ class _Handler(BaseHTTPRequestHandler):
             # SAFE: input is literal data, auto-escaped; never evaluated as a template.
             return self._send_raw(200, f"<!doctype html><html><body><p>Hello, "
                                        f"{html.escape(name)}</p></body></html>", "text/html")
+
+        if path == "/redirect":
+            # VULN: the destination is trusted verbatim, so it can point off-site.
+            return self._redirect(self._query().get("next", "/"))
+
+        if path == "/safe-redirect":
+            nxt = self._query().get("next", "/")
+            # SAFE: only same-site relative paths (single leading slash, not "//host").
+            safe = nxt.startswith("/") and not nxt.startswith("//")
+            return self._redirect(nxt if safe else "/")
+
+        if path == "/fetch":
+            url = self._query().get("url", "")
+            # VULN: no allowlist/SSRF guard, so internal and metadata URLs are fetched too.
+            return self._send_raw(200, _fake_fetch(url), "text/plain")
+
+        if path == "/safe-fetch":
+            url = self._query().get("url", "")
+            if _is_internal(_url_host(url)):
+                return self._send(403, {"error": "destination not allowed"})  # SAFE: blocked
+            return self._send_raw(200, _fake_fetch(url), "text/plain")
 
         if path == "/ping":
             host = self._query().get("host", "")

@@ -42,6 +42,14 @@ class Response:
         return "\n".join(lines) + "\n"
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Disables automatic redirect following; the 3xx surfaces as an HTTPError the
+    session captures, so the Location header is readable and no new request is made."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 class Session:
     """A cookie-persisting HTTP session."""
 
@@ -52,12 +60,18 @@ class Session:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.jar)
         )
+        # A second opener that never follows 3xx, so a checker can read the Location
+        # header without the client leaving scope to fetch the redirect target.
+        self.no_redirect_opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar), _NoRedirect()
+        )
         self.request_count = 0
 
     def _url(self, url: str) -> str:
         return url if url.startswith("http") else self.base + url
 
-    def request(self, method, url, data=None, json_body=None, headers=None) -> Response:
+    def request(self, method, url, data=None, json_body=None, headers=None,
+                allow_redirects=True, raw=None) -> Response:
         url = self._url(url)
         headers = dict(headers or {})
         body = None
@@ -67,12 +81,16 @@ class Session:
         elif data is not None:
             body = urllib.parse.urlencode(data).encode()
             headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        elif raw is not None:
+            body = raw.encode() if isinstance(raw, str) else raw
+            headers.setdefault("Content-Type", "application/octet-stream")
         req = urllib.request.Request(url, data=body, method=method, headers=headers)
         req_record = {"method": method, "url": url, "headers": headers,
                       "body": body.decode("utf-8", "replace") if body else None}
+        opener = self.opener if allow_redirects else self.no_redirect_opener
         t0 = time.time()
         try:
-            resp = self.opener.open(req, timeout=self.timeout)
+            resp = opener.open(req, timeout=self.timeout)
             status, rbody, rhdrs = resp.status, resp.read().decode("utf-8", "replace"), dict(resp.headers)
         except urllib.error.HTTPError as e:
             status, rbody, rhdrs = e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
