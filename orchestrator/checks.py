@@ -467,3 +467,28 @@ def check_xxe(session, hyp, ev_dir, ctx):
                            false_positive_reason="external entities are not resolved "
                                                  "(reference returned unexpanded)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("HOST-HEADER", "HOST_HEADER")
+def check_host_header(session, hyp, ev_dir, ctx):
+    """Host header injection: the app builds an absolute URL (e.g. a password-reset link)
+    from the attacker-controlled Host header. Confirm by sending a marker Host and finding
+    it reflected into the response, where it was not with the real Host."""
+    endpoint = hyp["endpoint"]
+    marker = "evil-" + secrets.token_hex(3) + ".example"
+
+    control = session.get(endpoint)
+    inject = session.get(endpoint, headers={"Host": marker})
+    files = save_evidence(ev_dir, "control-host", control)
+    files += save_evidence(ev_dir, "inject-host", inject)
+
+    if marker in inject.body and marker not in control.body:
+        return CheckResult("confirmed", endpoint, "medium", f"Host: {marker}",
+                           f"The request Host header was reflected into the response "
+                           f"({marker}), so a generated link can be pointed at an attacker "
+                           "host.", files=files)
+    if control.status == 200 and marker not in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="response uses a fixed canonical host, not "
+                                                 "the request Host header")
+    return CheckResult("unconfirmed", endpoint, files=files)

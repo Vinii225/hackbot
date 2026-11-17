@@ -24,6 +24,8 @@ REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "retu
 SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "image",
                     "img", "imageurl", "src", "load", "open", "domain", "callback", "site"}
 XXE_PATH_HINTS = ("import", "upload", "xml", "soap", "parse", "ingest", "document", "feed")
+HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "invite",
+                          "link", "activate", "recover")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -166,6 +168,19 @@ def make_hypotheses(crawl) -> list:
                          "class": "XXE", "confidence": "low",
                          "reason": f"{path} may parse an uploaded XML document; test for "
                                    "external entity resolution.",
+                         "status": "open"})
+
+    # HOST-HEADER: endpoints that build absolute links (reset/verify mails) from the
+    # request Host, which an attacker can set.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in HOST_HEADER_PATH_HINTS) \
+                and ("HOST-HEADER", path) not in seen:
+            seen.add(("HOST-HEADER", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "HOST-HEADER", "confidence": "low",
+                         "reason": f"{path} may embed the request Host in a generated link; "
+                                   "test Host header injection.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

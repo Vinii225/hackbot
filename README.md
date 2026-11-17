@@ -20,6 +20,7 @@ you are explicitly authorized to test.
 - **Server-Side Request Forgery (SSRF)** — `agents/vuln-hunter/skills/ssrf/ssrf.md`
 - **CORS Misconfiguration** — `agents/vuln-hunter/skills/cors/cors.md`
 - **XML External Entity (XXE)** — `agents/vuln-hunter/skills/xxe/xxe.md`
+- **Host Header Injection** — `agents/vuln-hunter/skills/host-header/host-header.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 

@@ -26,6 +26,8 @@ Scenarios:
   GET  /api/safe-data           CORS: fixed allowlisted origin only                  (SAFE)
   POST /import                  XXE: XML parser resolves external SYSTEM entities     (VULN)
   POST /safe-import             XXE: entities not resolved (hardened parser)          (SAFE)
+  GET  /reset-link              Host header injection: Host reflected into a link     (VULN)
+  GET  /safe-reset-link         link built from a fixed canonical host               (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -66,6 +68,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/fetch?url=https://example.com/logo.png">Preview</a>
 <a href="/api/data">Data API</a>
 <form action="/import" method="POST"><input name="xml"><button>Import</button></form>
+<a href="/reset-link">Reset password</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -318,6 +321,19 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "https://app.example")
             self.end_headers()
             return self.wfile.write(body)
+
+        if path == "/reset-link":
+            host = self.headers.get("Host", "")
+            # VULN: absolute link built from the attacker-controlled Host header.
+            return self._send_raw(200, '<!doctype html><html><body>Password reset: '
+                                       f'<a href="https://{host}/reset?token=abc123">link'
+                                       "</a></body></html>", "text/html")
+
+        if path == "/safe-reset-link":
+            # SAFE: link always built from a fixed canonical host.
+            return self._send_raw(200, '<!doctype html><html><body>Password reset: '
+                                       '<a href="https://app.example/reset?token=abc123">'
+                                       "link</a></body></html>", "text/html")
 
         if path == "/me":
             if not who:

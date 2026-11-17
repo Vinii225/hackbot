@@ -25,10 +25,13 @@ CLASS_META = {
              "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
     "XXE": {"title": "XML External Entity Injection", "cwe": "CWE-611",
             "owasp": "A05:2021 Security Misconfiguration", "severity": "high"},
+    "HOST-HEADER": {"title": "Host Header Injection", "cwe": "CWE-644",
+                    "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
-            "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT"}
+            "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT",
+            "HOST_HEADER": "HOST-HEADER"}
 
 
 def meta_for(cls):

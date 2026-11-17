@@ -22,7 +22,8 @@
     "open-redirect",
     "ssrf",
     "cors",
-    "xxe"
+    "xxe",
+    "host-header"
   ],
   "allowed_tools": [
     "curl",
@@ -40,6 +41,7 @@
     "open-redirect",
     "ssrf",
     "cors",
-    "xxe"
+    "xxe",
+    "host-header"
   ]
 }
