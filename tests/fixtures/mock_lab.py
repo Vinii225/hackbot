@@ -18,6 +18,8 @@ Scenarios:
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
   GET  /greeting?name=          server-side template injection (expr evaluated)       (VULN)
   GET  /safe-greeting?name=     input rendered as literal text, auto-escaped          (SAFE)
+  GET  /redirect?next=          open redirect: 302 to any destination, unchecked      (VULN)
+  GET  /safe-redirect?next=     only same-site relative paths allowed                 (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -54,6 +56,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/download?file=welcome.txt">Download welcome</a>
 <a href="/search?q=test">Search</a>
 <a href="/greeting?name=friend">Greeting</a>
+<a href="/redirect?next=/account">Continue</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -179,6 +182,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -331,6 +340,16 @@ class _Handler(BaseHTTPRequestHandler):
             # SAFE: input is literal data, auto-escaped; never evaluated as a template.
             return self._send_raw(200, f"<!doctype html><html><body><p>Hello, "
                                        f"{html.escape(name)}</p></body></html>", "text/html")
+
+        if path == "/redirect":
+            # VULN: the destination is trusted verbatim, so it can point off-site.
+            return self._redirect(self._query().get("next", "/"))
+
+        if path == "/safe-redirect":
+            nxt = self._query().get("next", "/")
+            # SAFE: only same-site relative paths (single leading slash, not "//host").
+            safe = nxt.startswith("/") and not nxt.startswith("//")
+            return self._redirect(nxt if safe else "/")
 
         if path == "/ping":
             host = self._query().get("host", "")
