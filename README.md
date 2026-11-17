@@ -1,5 +1,7 @@
 # Hackbot
 
+[![CI](https://github.com/Vinii225/hackbot/actions/workflows/ci.yml/badge.svg)](https://github.com/Vinii225/hackbot/actions/workflows/ci.yml)
+
 An AI-orchestrated harness for **authorized** web application security testing, built on a
 Coordinator pattern. Designed for PortSwigger Web Security Academy labs and other targets
 you are explicitly authorized to test.
