@@ -37,7 +37,11 @@
     "nosqli",
     "xpathi",
     "insecure-cookie",
-    "default-creds"
+    "default-creds",
+    "ssi",
+    "deserial",
+    "verb-tamper",
+    "crlf"
   ],
   "allowed_tools": [
     "curl",
@@ -70,6 +74,10 @@
     "nosqli",
     "xpathi",
     "insecure-cookie",
-    "default-creds"
+    "default-creds",
+    "ssi",
+    "deserial",
+    "verb-tamper",
+    "crlf"
   ]
 }

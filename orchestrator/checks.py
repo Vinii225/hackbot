@@ -806,3 +806,100 @@ def check_default_creds(session, hyp, ev_dir, ctx):
                                files=files)
     return CheckResult("false-positive", endpoint, files=files,
                        false_positive_reason="no default credential pair was accepted")
+
+
+@register("SSI", "SERVER-SIDE-INCLUDES")
+def check_ssi(session, hyp, ev_dir, ctx):
+    """Server-Side Includes injection: an SSI directive in user input is executed by the
+    server rather than treated as text."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "block"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    marker = "hb" + secrets.token_hex(3)
+    resp = send(f'<!--#exec cmd="echo {marker}"-->')
+    files = save_evidence(ev_dir, "inject-ssi", resp)
+    body = resp.body or ""
+
+    if marker in body and "exec" not in body.lower():
+        return CheckResult("confirmed", endpoint, "high", '<!--#exec cmd="echo ..."-->',
+                           "An SSI directive in the input was executed: its output appeared "
+                           "and the directive was consumed (server-side includes injection).",
+                           files=files)
+    if marker in body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="directive reflected as inert text "
+                                                 "(escaped, not executed)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("DESERIAL", "INSECURE-DESERIALIZATION", "DESERIALIZATION")
+def check_deserial(session, hyp, ev_dir, ctx):
+    """Insecure deserialization: a serialized object from the client is trusted, so a forged
+    type field escalates privileges."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "data"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    def blob(cls):
+        return base64.b64encode(
+            json.dumps({"__class__": cls, "user": ctx.actor}).encode()).decode()
+
+    def is_admin(resp):
+        try:
+            return bool(resp.json().get("admin"))
+        except Exception:
+            return False
+
+    control = send(blob("UserSession"))
+    inject = send(blob("AdminSession"))
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-object", inject)
+
+    if is_admin(inject) and not is_admin(control):
+        return CheckResult("confirmed", endpoint, "high", '{"__class__":"AdminSession"}',
+                           "A forged object type in the serialized blob was trusted and "
+                           "granted admin (insecure deserialization).", files=files)
+    if is_admin(inject) == is_admin(control):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="serialized type field ignored "
+                                                 "(authority resolved server-side)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("VERB-TAMPER", "VERB-TAMPERING", "HTTP-VERB-TAMPERING")
+def check_verb_tamper(session, hyp, ev_dir, ctx):
+    """HTTP verb tampering: an access control enforced on GET is skipped for another method."""
+    endpoint = hyp["endpoint"]
+    get = session.get(endpoint)
+    post = session.post(endpoint, data={})
+    files = save_evidence(ev_dir, "get", get)
+    files += save_evidence(ev_dir, "post", post)
+
+    if get.status in (401, 403) and post.status == 200:
+        return CheckResult("confirmed", endpoint, "high", "POST (control enforced only on GET)",
+                           "GET is denied (401/403) but POST to the same path returns 200, so "
+                           "authorization is scoped to one verb (verb tampering).", files=files)
+    if get.status == post.status:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="same authorization result across methods")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CRLF", "CRLF-INJECTION", "RESPONSE-SPLITTING", "HTTP-RESPONSE-SPLITTING")
+def check_crlf(session, hyp, ev_dir, ctx):
+    """CRLF injection / response splitting: a value reflected into a response header is not
+    stripped of CR/LF, letting an attacker inject a header."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "lang"
+    marker = "hb" + secrets.token_hex(3)
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    resp = send(f"en\r\nX-Hbcrlf: {marker}")
+    files = save_evidence(ev_dir, "inject-crlf", resp)
+    injected = next((v for k, v in resp.headers.items() if k.lower() == "x-hbcrlf"), "")
+
+    if marker in injected:
+        return CheckResult("confirmed", endpoint, "medium", "en\\r\\nX-Hbcrlf: <marker>",
+                           "A CRLF sequence in the value created a new response header "
+                           "(HTTP response splitting).", files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="CR/LF stripped; no header injected")

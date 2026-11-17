@@ -43,6 +43,10 @@ NOSQL_PATH_HINTS = ("nosql", "mongo")
 XPATH_PATH_HINTS = ("xpath", "xquery", "xml-search")
 COOKIE_PATH_HINTS = ("cookie", "session-cookie")
 DEFAULT_CREDS_PATH_HINTS = ("admin-login", "admin-signin", "default-login")
+SSI_PATH_HINTS = ("ssi", "include", "shtml")
+DESERIAL_PATH_HINTS = ("load-object", "deserialize", "unserialize", "view-object")
+VERB_TAMPER_PATH_HINTS = ("restricted", "verb", "method-protected")
+CRLF_PATH_HINTS = ("set-lang", "lang-pref", "set-header", "locale")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -359,6 +363,50 @@ def make_hypotheses(crawl) -> list:
             hyps.append({"endpoint": path, "method": "POST", "parameter": None,
                          "class": "DEFAULT-CREDS", "confidence": "low",
                          "reason": f"{path} is an admin login; test default credentials.",
+                         "status": "open"})
+
+    # SSI: pages that render user input through a server-side includes parser.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in SSI_PATH_HINTS) and ("SSI", path) not in seen:
+            seen.add(("SSI", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "block"),
+                         "class": "SSI", "confidence": "medium",
+                         "reason": f"{path} may render SSI directives; test directive execution.",
+                         "status": "open"})
+
+    # DESERIAL: endpoints that accept a serialized object from the client.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in DESERIAL_PATH_HINTS) and ("DESERIAL", path) not in seen:
+            seen.add(("DESERIAL", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "data"),
+                         "class": "DESERIAL", "confidence": "medium",
+                         "reason": f"{path} accepts a serialized object; test type/role forgery.",
+                         "status": "open"})
+
+    # VERB-TAMPER: privileged endpoints whose access check may be scoped to one method.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in VERB_TAMPER_PATH_HINTS) \
+                and ("VERB-TAMPER", path) not in seen:
+            seen.add(("VERB-TAMPER", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "VERB-TAMPER", "confidence": "medium",
+                         "reason": f"{path} is access-controlled; test an alternate HTTP verb.",
+                         "status": "open"})
+
+    # CRLF: endpoints that reflect a value into a response header.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in CRLF_PATH_HINTS) and ("CRLF", path) not in seen:
+            seen.add(("CRLF", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "lang"),
+                         "class": "CRLF", "confidence": "medium",
+                         "reason": f"{path} reflects input into a header; test CRLF injection.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

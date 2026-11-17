@@ -58,6 +58,14 @@ CLASS_META = {
     "DEFAULT-CREDS": {"title": "Default Credentials", "cwe": "CWE-1392",
                       "owasp": "A07:2021 Identification and Authentication Failures",
                       "severity": "high"},
+    "SSI": {"title": "Server-Side Includes (SSI) Injection", "cwe": "CWE-97",
+            "owasp": "A03:2021 Injection", "severity": "high"},
+    "DESERIAL": {"title": "Insecure Deserialization", "cwe": "CWE-502",
+                 "owasp": "A08:2021 Software and Data Integrity Failures", "severity": "high"},
+    "VERB-TAMPER": {"title": "HTTP Verb Tampering", "cwe": "CWE-650",
+                    "owasp": "A01:2021 Broken Access Control", "severity": "high"},
+    "CRLF": {"title": "CRLF Injection / HTTP Response Splitting", "cwe": "CWE-113",
+             "owasp": "A03:2021 Injection", "severity": "medium"},
 }
 
 # Concise, class-level remediation guidance surfaced in every report next to the finding.
@@ -114,6 +122,14 @@ REMEDIATION = {
                        "and Domain tightly.",
     "DEFAULT-CREDS": "Remove or force-rotate default/vendor credentials on first use; enforce "
                      "a strong password policy and lockout.",
+    "SSI": "Disable SSI on user-reachable pages; HTML-escape untrusted input and never pass "
+           "it through the SSI parser.",
+    "DESERIAL": "Never deserialize untrusted data into typed objects; use signed, "
+                "schema-validated tokens and ignore client-supplied type/role fields.",
+    "VERB-TAMPER": "Apply authorization to every HTTP method; deny by default and never scope "
+                   "an access check to a single verb.",
+    "CRLF": "Strip or reject CR/LF in any value reflected into a response header; use an API "
+            "that encodes header values.",
 }
 for _cls, _fix in REMEDIATION.items():
     CLASS_META[_cls]["remediation"] = _fix
@@ -127,7 +143,11 @@ _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
             "PROTO_POLLUTION": "PROTO-POLLUTION",
             "NOSQL": "NOSQLI", "NOSQL-INJECTION": "NOSQLI", "XPATH": "XPATHI",
             "XPATH-INJECTION": "XPATHI", "INSECURE_COOKIE": "INSECURE-COOKIE",
-            "DEFAULT_CREDS": "DEFAULT-CREDS"}
+            "DEFAULT_CREDS": "DEFAULT-CREDS",
+            "SERVER-SIDE-INCLUDES": "SSI", "DESERIALIZATION": "DESERIAL",
+            "INSECURE-DESERIALIZATION": "DESERIAL", "VERB-TAMPERING": "VERB-TAMPER",
+            "HTTP-VERB-TAMPERING": "VERB-TAMPER", "CRLF-INJECTION": "CRLF",
+            "RESPONSE-SPLITTING": "CRLF", "HTTP-RESPONSE-SPLITTING": "CRLF"}
 
 
 def meta_for(cls):

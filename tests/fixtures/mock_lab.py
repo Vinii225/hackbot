@@ -56,6 +56,14 @@ Scenarios:
   GET  /strong-cookie           cookie with HttpOnly; Secure; SameSite                (SAFE)
   POST /admin-login             default credentials: admin:admin accepted            (VULN)
   POST /safe-admin-login        default pair rejected                                (SAFE)
+  GET  /ssi-page?block=         SSI injection: <!--#exec--> directive executed        (VULN)
+  GET  /safe-ssi-page?block=    SSI directive HTML-escaped                           (SAFE)
+  GET  /load-object?data=       deserialization: forged __class__ grants admin       (VULN)
+  GET  /safe-load-object?data=  serialized type field ignored                        (SAFE)
+  GET  /restricted-area         verb tampering: GET denied but POST allowed          (VULN)
+  GET  /safe-restricted-area    denied on every method                               (SAFE)
+  GET  /set-lang?lang=          CRLF injection: value reflected into a header        (VULN)
+  GET  /safe-set-lang?lang=     CR/LF stripped from the header value                 (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -109,6 +117,10 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/nosql-login">NoSQL login</a>
 <a href="/xpath-search?xp=test">XPath search</a>
 <a href="/weak-cookie">Session cookie</a>
+<a href="/ssi-page?block=hello">Localized page</a>
+<a href="/load-object?data=e30=">Load object</a>
+<a href="/restricted-area">Restricted area</a>
+<a href="/set-lang?lang=en">Set language</a>
 <form action="/admin-login" method="POST"><input name="username"><input name="password"><button>Sign in</button></form>
 <form action="/update-profile" method="POST"><input name="name"><button>Update</button></form>
 <form action="/login-verbose" method="POST"><input name="username"><input name="password"><button>Go</button></form>
@@ -215,6 +227,14 @@ def _fake_ldap(value: str, escape: bool):
     if not escape and (")(" in value or "*" in value):
         return list(USERS)                       # injection -> all records
     return [value] if value in USERS else []
+
+
+def _render_ssi(value: str, evaluate: bool):
+    """Emulate a server-side includes parser. When evaluate, an `<!--#exec cmd="echo X"-->`
+    directive is replaced by its output; otherwise everything is HTML-escaped (inert text)."""
+    if evaluate:
+        value = re.sub(r'<!--#exec\s+cmd="echo ([^"]*)"-->', r"\1", value)
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _fake_xpath(value: str, escape: bool):
@@ -402,6 +422,10 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/change-email":
             # VULN: no anti-CSRF token required for a state-changing request.
             return self._send(200, {"changed": form.get("email", "")})
+        if self.path == "/restricted-area":
+            return self._send(200, {"config": "secret"})           # VULN: no check on POST
+        if self.path == "/safe-restricted-area":
+            return self._send(401, {"error": "admin only"})         # SAFE: denied on POST too
         if self.path in ("/admin-login", "/safe-admin-login"):
             user, pw = form.get("username", ""), form.get("password", "")
             if self.path == "/admin-login" and user == "admin" and pw == "admin":
@@ -533,6 +557,35 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ("/safe-files", "/safe-files/"):
             return self._send(403, {"error": "forbidden"})  # SAFE: no listing
 
+        if path in ("/ssi-page", "/safe-ssi-page"):
+            rendered = _render_ssi(self._query().get("block", ""), evaluate=path == "/ssi-page")
+            return self._send_raw(200, f"<!doctype html><html><body>{rendered}</body></html>",
+                                  "text/html")
+        if path in ("/load-object", "/safe-load-object"):
+            try:
+                obj = json.loads(base64.b64decode(self._query().get("data", "")))
+            except Exception:
+                obj = {}
+            cls = obj.get("__class__", "UserSession") if path == "/load-object" else "UserSession"
+            return self._send(200, {"session_class": cls, "admin": cls == "AdminSession"})
+        if path in ("/restricted-area", "/safe-restricted-area"):
+            return self._send(401, {"error": "admin only"})        # GET is access-controlled
+        if path in ("/set-lang", "/safe-set-lang"):
+            lang = self._query().get("lang", "en")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            if path == "/set-lang":
+                for part in lang.split("\r\n"):                   # VULN: each line a header
+                    if ":" in part:
+                        k, v = part.split(":", 1)
+                        self.send_header(k.strip(), v.strip())
+                    else:
+                        self.send_header("X-Lang", part)
+            else:
+                self.send_header("X-Lang", lang.replace("\r", "").replace("\n", " "))  # SAFE
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+            return
         if path in ("/xpath-search", "/safe-xpath-search"):
             found = _fake_xpath(self._query().get("xp", ""), escape=path == "/safe-xpath-search")
             return self._send(200, {"results": found})
