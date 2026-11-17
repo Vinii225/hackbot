@@ -34,6 +34,8 @@ Scenarios:
   GET  /safe-panel              sets X-Frame-Options: DENY                           (SAFE)
   POST /graphql                 GraphQL introspection enabled (schema disclosed)     (VULN)
   POST /safe-graphql            introspection disabled                               (SAFE)
+  GET  /api/jwt-whoami          JWT: accepts unsigned alg:none bearer tokens         (VULN)
+  GET  /api/safe-jwt-whoami     rejects unsigned tokens                              (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -45,6 +47,7 @@ whoami, id) so injection is observable deterministically without any real execut
 """
 from __future__ import annotations
 
+import base64
 import html
 import json
 import posixpath
@@ -78,6 +81,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <form action="/change-email" method="POST"><input name="email"><button>Save</button></form>
 <a href="/panel">Panel</a>
 <a href="/graphql">GraphQL API</a>
+<a href="/api/jwt-whoami">Who am I</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -159,6 +163,18 @@ def _xml_expand(body: str, resolve_entities: bool) -> str:
     for name, val in entities.items():
         out = out.replace(f"&{name};", val)
     return out.strip()
+
+
+def _decode_jwt(token: str):
+    """Best-effort JWT decode for the fixture: returns (header, payload) dicts or (None, None).
+    Does not verify signatures — that is exactly the point of the alg:none scenario."""
+    try:
+        header_b64, payload_b64 = token.split(".")[:2]
+        def d(seg):
+            return json.loads(base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4)))
+        return d(header_b64), d(payload_b64)
+    except Exception:
+        return None, None
 
 
 def _fake_fetch(url: str) -> str:
@@ -377,6 +393,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
+
+        if path in ("/api/jwt-whoami", "/api/safe-jwt-whoami"):
+            auth = self.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            header, payload = _decode_jwt(token)
+            if header and header.get("alg") == "none":
+                if path == "/api/jwt-whoami":  # VULN: trusts an unsigned token
+                    return self._send(200, {"user": payload.get("user"),
+                                            "role": payload.get("role")})
+                return self._send(401, {"error": "unsigned tokens rejected"})  # SAFE
+            return self._send(401, {"error": "invalid token"})
 
         if path == "/me":
             if not who:

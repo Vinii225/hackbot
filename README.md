@@ -24,6 +24,7 @@ you are explicitly authorized to test.
 - **Cross-Site Request Forgery (CSRF)** — `agents/vuln-hunter/skills/csrf/csrf.md`
 - **Clickjacking (missing frame protection)** — `agents/vuln-hunter/skills/clickjacking/clickjacking.md`
 - **GraphQL Introspection** — `agents/vuln-hunter/skills/graphql/graphql.md`
+- **JWT alg:none Bypass** — `agents/vuln-hunter/skills/jwt/jwt.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 

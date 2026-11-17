@@ -26,7 +26,8 @@
     "host-header",
     "csrf",
     "clickjacking",
-    "graphql"
+    "graphql",
+    "jwt"
   ],
   "allowed_tools": [
     "curl",
@@ -48,6 +49,7 @@
     "host-header",
     "csrf",
     "clickjacking",
-    "graphql"
+    "graphql",
+    "jwt"
   ]
 }

@@ -33,6 +33,8 @@ CLASS_META = {
                      "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
     "GRAPHQL": {"title": "GraphQL Introspection Exposed", "cwe": "CWE-200",
                 "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "JWT": {"title": "JWT alg:none Signature Bypass", "cwe": "CWE-347",
+            "owasp": "A07:2021 Identification and Authentication Failures", "severity": "high"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

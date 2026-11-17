@@ -30,6 +30,7 @@ CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "creat
                    "transfer", "settings", "profile", "subscribe")
 CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
 GRAPHQL_PATH_HINTS = ("graphql", "graphiql", "gql", "graph")
+JWT_PATH_HINTS = ("jwt", "whoami", "token", "session-info")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -222,6 +223,17 @@ def make_hypotheses(crawl) -> list:
                          "class": "GRAPHQL", "confidence": "low",
                          "reason": f"{path} looks like a GraphQL endpoint; test whether "
                                    "schema introspection is exposed.",
+                         "status": "open"})
+
+    # JWT: endpoints that authenticate via a bearer token; test alg:none forgery.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in JWT_PATH_HINTS) and ("JWT", path) not in seen:
+            seen.add(("JWT", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "JWT", "confidence": "low",
+                         "reason": f"{path} authenticates via a bearer token; test whether "
+                                   "an unsigned (alg:none) token is accepted.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
