@@ -40,6 +40,14 @@ Scenarios:
   GET  /safe-compute?n=         generic error on bad input                           (SAFE)
   GET  /files/                  directory listing (auto index) exposed               (VULN)
   GET  /safe-files/             directory access forbidden (403)                     (SAFE)
+  GET  /ldap-login?login=       LDAP injection: filter metachars alter the query     (VULN)
+  GET  /safe-ldap-login?login=  LDAP metacharacters escaped                          (SAFE)
+  POST /update-profile          mass assignment: binds a privileged role field       (VULN)
+  POST /safe-update-profile     role field ignored                                   (SAFE)
+  POST /login-verbose           username enumeration: distinct valid/invalid replies (VULN)
+  POST /safe-login-verbose      uniform invalid-credentials reply                    (SAFE)
+  POST /merge                   prototype pollution: honors __proto__ in merge        (VULN)
+  POST /safe-merge              strips __proto__/constructor keys                     (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -88,6 +96,10 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/api/jwt-whoami">Who am I</a>
 <a href="/compute?n=5">Compute</a>
 <a href="/files/">Files</a>
+<a href="/ldap-login?login=admin">LDAP login</a>
+<a href="/merge">Merge config</a>
+<form action="/update-profile" method="POST"><input name="name"><button>Update</button></form>
+<form action="/login-verbose" method="POST"><input name="username"><input name="password"><button>Go</button></form>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -181,6 +193,28 @@ def _decode_jwt(token: str):
         return d(header_b64), d(payload_b64)
     except Exception:
         return None, None
+
+
+def _fake_ldap(value: str, escape: bool):
+    """Emulate `(&(uid=<value>)...)`. Unescaped filter metacharacters ( ) * | break out of
+    the clause and match every record; escaping neutralizes them. No real LDAP is used."""
+    if escape:
+        value = re.sub(r"[*()|&]", "", value)
+    if not escape and (")(" in value or "*" in value):
+        return list(USERS)                       # injection -> all records
+    return [value] if value in USERS else []
+
+
+def _merge(target: dict, src: dict, safe: bool):
+    """Recursive dict merge. When safe, dangerous keys are skipped (no prototype pollution)."""
+    for k, v in src.items():
+        if safe and k in ("__proto__", "constructor", "prototype"):
+            continue
+        if isinstance(v, dict) and isinstance(target.get(k), dict):
+            _merge(target[k], v, safe)
+        else:
+            target[k] = v
+    return target
 
 
 def _fake_fetch(url: str) -> str:
@@ -284,6 +318,14 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path in ("/import", "/safe-import"):
             expanded = _xml_expand(raw, resolve_entities=self.path == "/import")
             return self._send_raw(200, expanded, "application/xml")
+        if self.path in ("/merge", "/safe-merge"):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            merged = _merge({}, payload, safe=self.path == "/safe-merge")
+            proto = merged.get("__proto__") if isinstance(merged.get("__proto__"), dict) else {}
+            return self._send(200, {"merged": True, "polluted": proto.get("hbflag")})
         if self.path in ("/graphql", "/safe-graphql"):
             try:
                 query = json.loads(raw).get("query", "")
@@ -306,6 +348,21 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/feedback":
             # SAFE: input is treated as data and echoed back; never shelled out.
             return self._send(200, {"received": form.get("message", "")})
+        if self.path in ("/update-profile", "/safe-update-profile"):
+            # VULN binds any field sent (incl. role); SAFE ignores the privileged field.
+            role = form.get("role", "user") if self.path == "/update-profile" else "user"
+            return self._send(200, {"name": form.get("name", ""), "role": role})
+        if self.path in ("/login-verbose", "/safe-login-verbose"):
+            u = USERS.get(form.get("username", ""))
+            if self.path == "/safe-login-verbose":
+                ok = u and u["password"] == form.get("password")
+                return self._send(200 if ok else 401,
+                                  {"login": "ok"} if ok else {"error": "invalid credentials"})
+            if not u:                                   # VULN: distinct messages
+                return self._send(401, {"error": "user not found"})
+            if u["password"] != form.get("password"):
+                return self._send(401, {"error": "incorrect password"})
+            return self._send(200, {"login": "ok"})
         if self.path == "/change-email":
             # VULN: no anti-CSRF token required for a state-changing request.
             return self._send(200, {"changed": form.get("email", "")})
@@ -432,6 +489,11 @@ class _Handler(BaseHTTPRequestHandler):
                                        "</ul></body></html>", "text/html")  # VULN
         if path in ("/safe-files", "/safe-files/"):
             return self._send(403, {"error": "forbidden"})  # SAFE: no listing
+
+        if path in ("/ldap-login", "/safe-ldap-login"):
+            value = self._query().get("login", "")
+            found = _fake_ldap(value, escape=path == "/safe-ldap-login")
+            return self._send(200, {"users": found})
 
         if path == "/me":
             if not who:

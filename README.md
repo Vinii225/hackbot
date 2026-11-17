@@ -9,7 +9,7 @@ you are explicitly authorized to test.
 
 ## Vulnerability coverage
 
-Seventeen vulnerability classes ship as skills, each with a deterministic checker,
+Twenty-one vulnerability classes ship as skills, each with a deterministic checker,
 vulnerable + safe fixtures and end-to-end tests:
 
 - **IDOR / Broken Access Control** — `agents/vuln-hunter/skills/idor/idor.md`
@@ -30,6 +30,10 @@ vulnerable + safe fixtures and end-to-end tests:
 - **JWT alg:none Bypass** — `agents/vuln-hunter/skills/jwt/jwt.md`
 - **Verbose Error / Information Disclosure** — `agents/vuln-hunter/skills/info-disclosure/info-disclosure.md`
 - **Directory Listing** — `agents/vuln-hunter/skills/dir-listing/dir-listing.md`
+- **LDAP Injection** — `agents/vuln-hunter/skills/ldapi/ldapi.md`
+- **Mass Assignment** — `agents/vuln-hunter/skills/mass-assignment/mass-assignment.md`
+- **Username Enumeration** — `agents/vuln-hunter/skills/user-enum/user-enum.md`
+- **Prototype Pollution** — `agents/vuln-hunter/skills/proto-pollution/proto-pollution.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -185,7 +189,7 @@ to the target.
 
 ## Roadmap (future skills)
 
-Insecure Deserialization · LDAP Injection · XPath Injection · Prototype Pollution ·
-Race Conditions · Business-Logic flaws · Subdomain Takeover — each added as a new
+Insecure Deserialization · XPath Injection · Race Conditions ·
+Business-Logic flaws · Subdomain Takeover — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` (checker + fixtures + test) plus a
 Coordinator routing rule, with no change to the loop.

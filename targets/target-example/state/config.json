@@ -29,7 +29,11 @@
     "graphql",
     "jwt",
     "info-disclosure",
-    "dir-listing"
+    "dir-listing",
+    "ldapi",
+    "mass-assignment",
+    "user-enum",
+    "proto-pollution"
   ],
   "allowed_tools": [
     "curl",
@@ -54,6 +58,10 @@
     "graphql",
     "jwt",
     "info-disclosure",
-    "dir-listing"
+    "dir-listing",
+    "ldapi",
+    "mass-assignment",
+    "user-enum",
+    "proto-pollution"
   ]
 }

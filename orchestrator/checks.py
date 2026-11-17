@@ -634,3 +634,89 @@ def check_dir_listing(session, hyp, ev_dir, ctx):
                            false_positive_reason=f"directory access returned {resp.status} "
                                                  "(listing not exposed)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("LDAPI", "LDAP", "LDAP-INJECTION")
+def check_ldapi(session, hyp, ev_dir, ctx):
+    """LDAP injection: filter metacharacters injected into an LDAP query change its logic
+    (e.g. a wildcard/always-true clause returns records a benign lookup does not)."""
+    endpoint, param = hyp["endpoint"], hyp.get("parameter") or "user"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    control = send("nobody-" + secrets.token_hex(3))
+    inject = send("*)(uid=*))(|(uid=*")
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-ldap", inject)
+
+    if inject.status == 200 and len(inject.body) > len(control.body) + 2:
+        return CheckResult("confirmed", endpoint, "high", f"{param}=*)(uid=*))(|(uid=*",
+                           "An LDAP filter injection returned records the benign lookup did "
+                           "not (filter logic altered).", files=files)
+    if len(inject.body) <= len(control.body):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="LDAP metacharacters appear escaped "
+                                                 "(no extra records returned)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("MASS-ASSIGNMENT", "MASS_ASSIGNMENT")
+def check_mass_assignment(session, hyp, ev_dir, ctx):
+    """Mass assignment: the endpoint binds a privileged field (role) from the request body
+    that a client should not control, escalating privilege."""
+    endpoint = hyp["endpoint"]
+    marker = "hb" + secrets.token_hex(3)
+    resp = session.post(endpoint, data={"name": marker, "role": "admin"})
+    files = save_evidence(ev_dir, "inject-role", resp)
+    data = resp.json()
+
+    if resp.status == 200 and isinstance(data, dict) and data.get("role") == "admin":
+        return CheckResult("confirmed", endpoint, "high", "role=admin (unexpected field)",
+                           "The server bound a privileged 'role' field from the request body "
+                           "(mass assignment / privilege escalation).", files=files)
+    if isinstance(data, dict) and "role" in data and data.get("role") != "admin":
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"privileged field ignored (role stayed "
+                                                 f"'{data.get('role')}')")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("USER-ENUM", "USER_ENUM")
+def check_user_enum(session, hyp, ev_dir, ctx):
+    """Username enumeration: the login response differs for a valid vs an invalid username,
+    letting an attacker learn which accounts exist."""
+    endpoint = hyp["endpoint"]
+    pw = "wrong-" + secrets.token_hex(3)
+    valid = session.post(endpoint, data={"username": ctx.actor, "password": pw})
+    invalid = session.post(endpoint,
+                           data={"username": "nouser-" + secrets.token_hex(4), "password": pw})
+    files = save_evidence(ev_dir, "valid-username", valid)
+    files += save_evidence(ev_dir, "invalid-username", invalid)
+
+    if valid.status != invalid.status or (valid.body or "") != (invalid.body or ""):
+        return CheckResult("confirmed", endpoint, "medium",
+                           f"username={ctx.actor} vs a random username",
+                           "The login response differs for a valid versus an invalid "
+                           "username, disclosing which accounts exist.", files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="identical response for valid and invalid "
+                                             "usernames (no oracle)")
+
+
+@register("PROTO-POLLUTION", "PROTOTYPE-POLLUTION", "PROTO_POLLUTION")
+def check_proto_pollution(session, hyp, ev_dir, ctx):
+    """Prototype pollution: a JSON-merge endpoint honors a __proto__ key, letting attacker
+    data land on the object prototype."""
+    endpoint = hyp["endpoint"]
+    marker = "hb" + secrets.token_hex(3)
+    resp = session.post(endpoint, json_body={"__proto__": {"hbflag": marker}})
+    files = save_evidence(ev_dir, "proto-merge", resp)
+    body = resp.body or ""
+
+    if marker in body:
+        return CheckResult("confirmed", endpoint, "high", '{"__proto__":{"hbflag":"..."}}',
+                           "A __proto__ key from the request body polluted the merged object "
+                           "(prototype pollution).", files=files)
+    if resp.status == 200:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="__proto__ key did not pollute the object "
+                                                 "(stripped or ignored)")
+    return CheckResult("unconfirmed", endpoint, files=files)

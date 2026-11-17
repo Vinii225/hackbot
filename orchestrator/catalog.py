@@ -39,6 +39,16 @@ CLASS_META = {
                         "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
     "DIR-LISTING": {"title": "Directory Listing Enabled", "cwe": "CWE-548",
                     "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "LDAPI": {"title": "LDAP Injection", "cwe": "CWE-90",
+              "owasp": "A03:2021 Injection", "severity": "high"},
+    "MASS-ASSIGNMENT": {"title": "Mass Assignment", "cwe": "CWE-915",
+                        "owasp": "A01:2021 Broken Access Control", "severity": "high"},
+    "USER-ENUM": {"title": "Username Enumeration", "cwe": "CWE-204",
+                  "owasp": "A07:2021 Identification and Authentication Failures",
+                  "severity": "medium"},
+    "PROTO-POLLUTION": {"title": "Prototype Pollution", "cwe": "CWE-1321",
+                        "owasp": "A08:2021 Software and Data Integrity Failures",
+                        "severity": "high"},
 }
 
 # Concise, class-level remediation guidance surfaced in every report next to the finding.
@@ -79,6 +89,14 @@ REMEDIATION = {
                        "debug mode and stack traces in production.",
     "DIR-LISTING": "Disable automatic directory indexing (e.g. Options -Indexes / autoindex "
                    "off) and serve an explicit index or 403 for directories.",
+    "LDAPI": "Escape LDAP special characters per RFC 4515, or use parameterized LDAP APIs; "
+             "validate and allowlist input used in filters.",
+    "MASS-ASSIGNMENT": "Bind only an explicit allowlist of client-settable fields; never "
+                       "auto-bind privileged fields (role, isAdmin) from the request body.",
+    "USER-ENUM": "Return identical responses and timing for valid and invalid usernames on "
+                 "login, signup and password reset.",
+    "PROTO-POLLUTION": "Reject or strip __proto__/constructor/prototype keys before merging "
+                       "untrusted JSON; use Map or null-prototype objects and safe-merge.",
 }
 for _cls, _fix in REMEDIATION.items():
     CLASS_META[_cls]["remediation"] = _fix
@@ -86,7 +104,10 @@ for _cls, _fix in REMEDIATION.items():
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
             "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT",
             "HOST_HEADER": "HOST-HEADER", "INFO_DISCLOSURE": "INFO-DISCLOSURE",
-            "DIR_LISTING": "DIR-LISTING", "DIRECTORY-LISTING": "DIR-LISTING"}
+            "DIR_LISTING": "DIR-LISTING", "DIRECTORY-LISTING": "DIR-LISTING",
+            "LDAP": "LDAPI", "LDAP-INJECTION": "LDAPI", "MASS_ASSIGNMENT": "MASS-ASSIGNMENT",
+            "USER_ENUM": "USER-ENUM", "PROTOTYPE-POLLUTION": "PROTO-POLLUTION",
+            "PROTO_POLLUTION": "PROTO-POLLUTION"}
 
 
 def meta_for(cls):

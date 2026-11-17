@@ -35,6 +35,10 @@ INFO_DISCLOSURE_PARAM_HINTS = {"n", "num", "count", "amount", "qty", "quantity",
                                "limit", "offset", "value", "index"}
 DIR_LISTING_PATH_HINTS = ("files", "uploads", "assets", "static", "backup", "download",
                           "media", "images")
+LDAP_PATH_HINTS = ("ldap", "directory-login", "ad-login")
+MASS_ASSIGN_PATH_HINTS = ("update", "profile", "account", "register", "signup", "user")
+USER_ENUM_PATH_HINTS = ("login", "signin", "sign-in", "authenticate", "forgot", "reset")
+PROTO_POLLUTION_PATH_HINTS = ("merge", "config", "settings", "preferences", "patch")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -261,6 +265,53 @@ def make_hypotheses(crawl) -> list:
             hyps.append({"endpoint": path, "method": "GET", "parameter": None,
                          "class": "DIR-LISTING", "confidence": "low",
                          "reason": f"{path} looks like a directory; test for an exposed index.",
+                         "status": "open"})
+
+    # LDAPI: login/search endpoints backed by an LDAP filter.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in LDAP_PATH_HINTS) and ("LDAPI", path) not in seen:
+            seen.add(("LDAPI", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "user"),
+                         "class": "LDAPI", "confidence": "medium",
+                         "reason": f"{path} looks LDAP-backed; test filter injection.",
+                         "status": "open"})
+
+    # MASS-ASSIGNMENT: object-update POSTs that may bind privileged fields.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "POST" \
+                and any(k in path.lower() for k in MASS_ASSIGN_PATH_HINTS) \
+                and ("MASS-ASSIGNMENT", path) not in seen:
+            seen.add(("MASS-ASSIGNMENT", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "MASS-ASSIGNMENT", "confidence": "low",
+                         "reason": f"{path} updates an object; test binding a privileged "
+                                   "field (role).",
+                         "status": "open"})
+
+    # USER-ENUM: authentication endpoints that may reveal which usernames exist.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in USER_ENUM_PATH_HINTS) \
+                and ("USER-ENUM", path) not in seen:
+            seen.add(("USER-ENUM", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "USER-ENUM", "confidence": "low",
+                         "reason": f"{path} authenticates users; test for a valid/invalid "
+                                   "username oracle.",
+                         "status": "open"})
+
+    # PROTO-POLLUTION: JSON-merge endpoints that may honor __proto__.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in PROTO_POLLUTION_PATH_HINTS) \
+                and ("PROTO-POLLUTION", path) not in seen:
+            seen.add(("PROTO-POLLUTION", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "PROTO-POLLUTION", "confidence": "low",
+                         "reason": f"{path} merges client JSON; test __proto__ pollution.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
