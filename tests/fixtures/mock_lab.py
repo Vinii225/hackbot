@@ -20,6 +20,8 @@ Scenarios:
   GET  /safe-greeting?name=     input rendered as literal text, auto-escaped          (SAFE)
   GET  /redirect?next=          open redirect: 302 to any destination, unchecked      (VULN)
   GET  /safe-redirect?next=     only same-site relative paths allowed                 (SAFE)
+  GET  /fetch?url=              SSRF: server fetches any url, incl. internal/metadata   (VULN)
+  GET  /safe-fetch?url=         blocks loopback/link-local/private ranges            (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -57,6 +59,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/search?q=test">Search</a>
 <a href="/greeting?name=friend">Greeting</a>
 <a href="/redirect?next=/account">Continue</a>
+<a href="/fetch?url=https://example.com/logo.png">Preview</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -100,6 +103,34 @@ APP_JS = """// account widget
 fetch('/me').then(r=>r.json()).then(u=>{ fetch('/api/user/'+u.id); });
 function ping(h){ return fetch('/ping?host='+encodeURIComponent(h)); }
 """
+
+
+# Emulated cloud instance-metadata response (the SSRF prize). Served ONLY to requests
+# the fixture "fetches" on the attacker's behalf, never to a direct client request.
+METADATA_DOC = ("ami-id: ami-0ff8e1\n"
+                "instance-id: i-0abc123def\n"
+                "iam/security-credentials/: app-emr-role\n")
+_INTERNAL_HOSTS = {"169.254.169.254", "127.0.0.1", "localhost", "0.0.0.0", "metadata"}
+
+
+def _url_host(url: str) -> str:
+    return urllib.parse.urlparse(url if "://" in url else "//" + url).hostname or ""
+
+
+def _is_internal(host: str) -> bool:
+    if host in _INTERNAL_HOSTS or host.startswith("10.") or host.startswith("192.168."):
+        return True
+    if host.startswith("169.254.") or host.startswith("127."):
+        return True
+    return any(host.startswith(f"172.{n}.") for n in range(16, 32))
+
+
+def _fake_fetch(url: str) -> str:
+    """Emulate a server that fetches `url`. Internal/metadata targets leak internal content;
+    nothing on the real network is contacted."""
+    if _url_host(url) == "169.254.169.254":
+        return METADATA_DOC
+    return json.dumps({"fetched": url, "body": "external content"})
 
 
 def _fake_shell(cmd: str) -> str:
@@ -350,6 +381,17 @@ class _Handler(BaseHTTPRequestHandler):
             # SAFE: only same-site relative paths (single leading slash, not "//host").
             safe = nxt.startswith("/") and not nxt.startswith("//")
             return self._redirect(nxt if safe else "/")
+
+        if path == "/fetch":
+            url = self._query().get("url", "")
+            # VULN: no allowlist/SSRF guard, so internal and metadata URLs are fetched too.
+            return self._send_raw(200, _fake_fetch(url), "text/plain")
+
+        if path == "/safe-fetch":
+            url = self._query().get("url", "")
+            if _is_internal(_url_host(url)):
+                return self._send(403, {"error": "destination not allowed"})  # SAFE: blocked
+            return self._send_raw(200, _fake_fetch(url), "text/plain")
 
         if path == "/ping":
             host = self._query().get("host", "")

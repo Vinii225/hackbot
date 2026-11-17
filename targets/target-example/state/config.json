@@ -19,7 +19,8 @@
     "access-control",
     "sqli",
     "ssti",
-    "open-redirect"
+    "open-redirect",
+    "ssrf"
   ],
   "allowed_tools": [
     "curl",
@@ -34,6 +35,7 @@
     "access-control",
     "sqli",
     "ssti",
-    "open-redirect"
+    "open-redirect",
+    "ssrf"
   ]
 }
