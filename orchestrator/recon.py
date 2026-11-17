@@ -16,6 +16,8 @@ ADMIN_PATH_HINTS = ("admin", "administrator", "manage", "management", "dashboard
                     "console", "internal", "staff", "moderator", "superuser")
 SQLI_PARAM_HINTS = {"category", "cat", "filter", "sort", "order", "search", "q", "query",
                     "name", "product", "productid", "id", "user", "username", "email"}
+SSTI_PARAM_HINTS = {"name", "template", "greeting", "preview", "content", "subject",
+                    "title", "message", "body", "text"}
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -103,6 +105,17 @@ def make_hypotheses(crawl) -> list:
                 hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
                              "class": "SQLI", "confidence": "medium",
                              "reason": f"Parameter '{p}' on {ep['path']} may flow into a SQL query.",
+                             "status": "open"})
+
+    # SSTI: params that plausibly flow into a server-side template render.
+    for ep in endpoints:
+        for p in ep["params"]:
+            if p.lower() in SSTI_PARAM_HINTS and ("SSTI", ep["path"], p) not in seen:
+                seen.add(("SSTI", ep["path"], p))
+                hyps.append({"endpoint": ep["path"], "method": ep["method"], "parameter": p,
+                             "class": "SSTI", "confidence": "medium",
+                             "reason": f"Parameter '{p}' on {ep['path']} may be rendered by a "
+                                       "server-side template engine.",
                              "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

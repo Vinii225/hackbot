@@ -301,3 +301,36 @@ def check_sqli(session, hyp, ev_dir, ctx):
                                                  "payloads returned identical results "
                                                  "(input appears parameterized)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("SSTI")
+def check_ssti(session, hyp, ev_dir, ctx):
+    """Server-side template injection: a math expression wrapped in an engine's delimiters
+    is evaluated server-side. Differential: a distinctive product appears only when the
+    expression is rendered, never from the literal control."""
+    endpoint, param = hyp["endpoint"], hyp["parameter"]
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    a, b = secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
+    product = str(a * b)
+    payloads = [f"{{{{{a}*{b}}}}}", f"${{{a}*{b}}}", f"#{{{a}*{b}}}", f"<%= {a}*{b} %>"]
+
+    control = send("HB" + secrets.token_hex(4))
+    files = save_evidence(ev_dir, "control-literal", control)
+
+    last = None
+    for payload in payloads:
+        inject = send(payload)
+        last = inject
+        if product in inject.body and product not in control.body:
+            files += save_evidence(ev_dir, "inject-ssti", inject)
+            return CheckResult("confirmed", endpoint, "high", f"{param}={payload}",
+                               f"Template expression {payload} was evaluated server-side "
+                               f"(response contains the product {product}, absent from the "
+                               f"literal control).", files=files)
+
+    files += save_evidence(ev_dir, "inject-ssti", last)
+    if last is not None and str(a) in last.body and str(b) in last.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="template payload reflected literally or "
+                                                 "encoded, not evaluated as an expression")
+    return CheckResult("unconfirmed", endpoint, files=files)

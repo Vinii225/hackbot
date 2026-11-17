@@ -16,6 +16,8 @@ Scenarios:
   GET  /ping?host=              reflected OS command injection, output returned       (VULN)
   GET  /ping-blind?host=        blind command injection: executes, no output         (VULN)
   POST /feedback  message=      echoes input as data, never shells out               (SAFE)
+  GET  /greeting?name=          server-side template injection (expr evaluated)       (VULN)
+  GET  /safe-greeting?name=     input rendered as literal text, auto-escaped          (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -51,6 +53,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/api/user/{id}">My account (API)</a>
 <a href="/download?file=welcome.txt">Download welcome</a>
 <a href="/search?q=test">Search</a>
+<a href="/greeting?name=friend">Greeting</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -128,6 +131,22 @@ def _fake_shell(cmd: str) -> str:
     cmd = expand(cmd)
     out = [run_one(seg) for seg in re.split(r"\s*(?:&&|\|\||[;|&\n])\s*", cmd)]
     return "\n".join(o for o in out if o)
+
+
+_TPL_EXPR = re.compile(
+    r"\{\{\s*(\d+)\s*\*\s*(\d+)\s*\}\}"      # {{a*b}}  Jinja2/Twig
+    r"|\$\{\s*(\d+)\s*\*\s*(\d+)\s*\}"        # ${a*b}   FreeMarker/EL
+    r"|#\{\s*(\d+)\s*\*\s*(\d+)\s*\}"          # #{a*b}   Thymeleaf
+    r"|<%=\s*(\d+)\s*\*\s*(\d+)\s*%>")           # <%= a*b %> ERB/EJS
+
+
+def _render_template(value: str) -> str:
+    """Emulate a template engine that evaluates `int * int` inside its delimiters. Never
+    calls eval(); only the two captured integers are multiplied."""
+    def repl(m):
+        nums = [g for g in m.groups() if g is not None]
+        return str(int(nums[0]) * int(nums[1]))
+    return _TPL_EXPR.sub(repl, value)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -298,6 +317,20 @@ class _Handler(BaseHTTPRequestHandler):
             q = self._query().get("q", "")
             return self._send_raw(200, f"<!doctype html><html><body><p>Results for: "
                                        f"{html.escape(q)}</p></body></html>", "text/html")
+
+        if path == "/greeting":
+            name = self._query().get("name", "")
+            # VULN: the engine renders (evaluates) the input, THEN the result is HTML-escaped.
+            # Expressions execute server-side even though markup output is encoded (SSTI, not XSS).
+            rendered = html.escape(_render_template(name))
+            return self._send_raw(200, f"<!doctype html><html><body><p>Hello, {rendered}"
+                                       "</p></body></html>", "text/html")
+
+        if path == "/safe-greeting":
+            name = self._query().get("name", "")
+            # SAFE: input is literal data, auto-escaped; never evaluated as a template.
+            return self._send_raw(200, f"<!doctype html><html><body><p>Hello, "
+                                       f"{html.escape(name)}</p></body></html>", "text/html")
 
         if path == "/ping":
             host = self._query().get("host", "")
