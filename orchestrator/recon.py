@@ -23,6 +23,14 @@ REDIRECT_PARAM_HINTS = {"next", "redirect", "redirect_url", "redirecturl", "retu
                         "continue", "goto", "to", "out", "forward", "callback"}
 SSRF_PARAM_HINTS = {"url", "uri", "link", "fetch", "feed", "webhook", "proxy", "image",
                     "img", "imageurl", "src", "load", "open", "domain", "callback", "site"}
+XXE_PATH_HINTS = ("import", "upload", "xml", "soap", "parse", "ingest", "document", "feed")
+HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "invite",
+                          "link", "activate", "recover")
+CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "create",
+                   "transfer", "settings", "profile", "subscribe")
+CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
+GRAPHQL_PATH_HINTS = ("graphql", "graphiql", "gql", "graph")
+JWT_PATH_HINTS = ("jwt", "whoami", "token", "session-info")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -154,6 +162,78 @@ def make_hypotheses(crawl) -> list:
                          "class": "CORS", "confidence": "low",
                          "reason": f"{path} looks like an API endpoint; probe its "
                                    "cross-origin resource sharing policy.",
+                         "status": "open"})
+
+    # XXE: endpoints that look like they ingest an uploaded document / XML body.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in XXE_PATH_HINTS) and ("XXE", path) not in seen:
+            seen.add(("XXE", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "XXE", "confidence": "low",
+                         "reason": f"{path} may parse an uploaded XML document; test for "
+                                   "external entity resolution.",
+                         "status": "open"})
+
+    # HOST-HEADER: endpoints that build absolute links (reset/verify mails) from the
+    # request Host, which an attacker can set.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in HOST_HEADER_PATH_HINTS) \
+                and ("HOST-HEADER", path) not in seen:
+            seen.add(("HOST-HEADER", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "HOST-HEADER", "confidence": "low",
+                         "reason": f"{path} may embed the request Host in a generated link; "
+                                   "test Host header injection.",
+                         "status": "open"})
+
+    # CSRF: state-changing POST endpoints whose anti-CSRF protection is worth testing.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "POST" and any(k in path.lower() for k in CSRF_PATH_HINTS) \
+                and ("CSRF", path) not in seen:
+            seen.add(("CSRF", path))
+            hyps.append({"endpoint": path, "method": "POST",
+                         "parameter": (ep["params"][0] if ep["params"] else None),
+                         "class": "CSRF", "confidence": "low",
+                         "reason": f"{path} is a state-changing POST; test whether it "
+                                   "accepts requests without an anti-CSRF token.",
+                         "status": "open"})
+
+    # CLICKJACKING: sensitive-looking GET pages that should refuse to be framed.
+    for ep in endpoints:
+        path = ep["path"]
+        if ep["method"].upper() == "GET" \
+                and any(k in path.lower() for k in CLICKJACKING_PATH_HINTS) \
+                and ("CLICKJACKING", path) not in seen:
+            seen.add(("CLICKJACKING", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "CLICKJACKING", "confidence": "low",
+                         "reason": f"{path} is a sensitive page; test whether it can be "
+                                   "framed (missing X-Frame-Options / CSP frame-ancestors).",
+                         "status": "open"})
+
+    # GRAPHQL: endpoints that look like a GraphQL API; test introspection.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in GRAPHQL_PATH_HINTS) and ("GRAPHQL", path) not in seen:
+            seen.add(("GRAPHQL", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "GRAPHQL", "confidence": "low",
+                         "reason": f"{path} looks like a GraphQL endpoint; test whether "
+                                   "schema introspection is exposed.",
+                         "status": "open"})
+
+    # JWT: endpoints that authenticate via a bearer token; test alg:none forgery.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in JWT_PATH_HINTS) and ("JWT", path) not in seen:
+            seen.add(("JWT", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "JWT", "confidence": "low",
+                         "reason": f"{path} authenticates via a bearer token; test whether "
+                                   "an unsigned (alg:none) token is accepted.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

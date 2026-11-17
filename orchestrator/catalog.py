@@ -23,10 +23,23 @@ CLASS_META = {
              "owasp": "A10:2021 Server-Side Request Forgery", "severity": "high"},
     "CORS": {"title": "CORS Misconfiguration", "cwe": "CWE-942",
              "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
+    "XXE": {"title": "XML External Entity Injection", "cwe": "CWE-611",
+            "owasp": "A05:2021 Security Misconfiguration", "severity": "high"},
+    "HOST-HEADER": {"title": "Host Header Injection", "cwe": "CWE-644",
+                    "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
+    "CSRF": {"title": "Cross-Site Request Forgery", "cwe": "CWE-352",
+             "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
+    "CLICKJACKING": {"title": "Clickjacking (missing frame protection)", "cwe": "CWE-1021",
+                     "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "GRAPHQL": {"title": "GraphQL Introspection Exposed", "cwe": "CWE-200",
+                "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "JWT": {"title": "JWT alg:none Signature Bypass", "cwe": "CWE-347",
+            "owasp": "A07:2021 Identification and Authentication Failures", "severity": "high"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
-            "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT"}
+            "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT",
+            "HOST_HEADER": "HOST-HEADER"}
 
 
 def meta_for(cls):

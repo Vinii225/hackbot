@@ -21,7 +21,13 @@
     "ssti",
     "open-redirect",
     "ssrf",
-    "cors"
+    "cors",
+    "xxe",
+    "host-header",
+    "csrf",
+    "clickjacking",
+    "graphql",
+    "jwt"
   ],
   "allowed_tools": [
     "curl",
@@ -38,6 +44,12 @@
     "ssti",
     "open-redirect",
     "ssrf",
-    "cors"
+    "cors",
+    "xxe",
+    "host-header",
+    "csrf",
+    "clickjacking",
+    "graphql",
+    "jwt"
   ]
 }

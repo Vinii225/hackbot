@@ -7,7 +7,10 @@ you are explicitly authorized to test.
 > **Authorized use only.** Every run is bounded by `targets/<target>/scope.md`. The
 > system never expands scope on its own. See [`CLAUDE.md`](CLAUDE.md).
 
-## MVP focus
+## Vulnerability coverage
+
+Fifteen vulnerability classes ship as skills, each with a deterministic checker,
+vulnerable + safe fixtures and end-to-end tests:
 
 - **IDOR / Broken Access Control** — `agents/vuln-hunter/skills/idor/idor.md`
 - **Command Injection** — `agents/vuln-hunter/skills/cmdi/cmdi.md`
@@ -19,6 +22,12 @@ you are explicitly authorized to test.
 - **Open Redirect** — `agents/vuln-hunter/skills/open-redirect/open-redirect.md`
 - **Server-Side Request Forgery (SSRF)** — `agents/vuln-hunter/skills/ssrf/ssrf.md`
 - **CORS Misconfiguration** — `agents/vuln-hunter/skills/cors/cors.md`
+- **XML External Entity (XXE)** — `agents/vuln-hunter/skills/xxe/xxe.md`
+- **Host Header Injection** — `agents/vuln-hunter/skills/host-header/host-header.md`
+- **Cross-Site Request Forgery (CSRF)** — `agents/vuln-hunter/skills/csrf/csrf.md`
+- **Clickjacking (missing frame protection)** — `agents/vuln-hunter/skills/clickjacking/clickjacking.md`
+- **GraphQL Introspection** — `agents/vuln-hunter/skills/graphql/graphql.md`
+- **JWT alg:none Bypass** — `agents/vuln-hunter/skills/jwt/jwt.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -172,7 +181,9 @@ python -m orchestrator targets/x --executor sim --sim examples/scenario.json --t
 See `orchestrator/triage.py`. The LLM is a decision layer only — it never sends requests
 to the target.
 
-## Roadmap (future skills, not in MVP)
+## Roadmap (future skills)
 
-JWT · GraphQL · XXE · CSRF — each added as a new
-`agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.
+Insecure Deserialization · LDAP Injection · XPath Injection · Prototype Pollution ·
+Race Conditions · Business-Logic flaws · Subdomain Takeover — each added as a new
+`agents/vuln-hunter/skills/<class>/<class>.md` (checker + fixtures + test) plus a
+Coordinator routing rule, with no change to the loop.

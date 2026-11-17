@@ -71,7 +71,7 @@ class Session:
         return url if url.startswith("http") else self.base + url
 
     def request(self, method, url, data=None, json_body=None, headers=None,
-                allow_redirects=True) -> Response:
+                allow_redirects=True, raw=None) -> Response:
         url = self._url(url)
         headers = dict(headers or {})
         body = None
@@ -81,6 +81,9 @@ class Session:
         elif data is not None:
             body = urllib.parse.urlencode(data).encode()
             headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        elif raw is not None:
+            body = raw.encode() if isinstance(raw, str) else raw
+            headers.setdefault("Content-Type", "application/octet-stream")
         req = urllib.request.Request(url, data=body, method=method, headers=headers)
         req_record = {"method": method, "url": url, "headers": headers,
                       "body": body.decode("utf-8", "replace") if body else None}
