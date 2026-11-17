@@ -21,6 +21,8 @@ CLASS_META = {
                       "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
     "SSRF": {"title": "Server-Side Request Forgery", "cwe": "CWE-918",
              "owasp": "A10:2021 Server-Side Request Forgery", "severity": "high"},
+    "CORS": {"title": "CORS Misconfiguration", "cwe": "CWE-942",
+             "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

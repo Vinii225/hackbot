@@ -22,6 +22,8 @@ Scenarios:
   GET  /safe-redirect?next=     only same-site relative paths allowed                 (SAFE)
   GET  /fetch?url=              SSRF: server fetches any url, incl. internal/metadata   (VULN)
   GET  /safe-fetch?url=         blocks loopback/link-local/private ranges            (SAFE)
+  GET  /api/data                CORS: reflects any Origin + allows credentials       (VULN)
+  GET  /api/safe-data           CORS: fixed allowlisted origin only                  (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -60,6 +62,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/greeting?name=friend">Greeting</a>
 <a href="/redirect?next=/account">Continue</a>
 <a href="/fetch?url=https://example.com/logo.png">Preview</a>
+<a href="/api/data">Data API</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -271,6 +274,26 @@ class _Handler(BaseHTTPRequestHandler):
             if user:
                 DELETED.add(user)  # state change: a scanner must never trigger this in recon
             return self._send(200, {"deleted": user})
+
+        if path == "/api/data":
+            body = json.dumps({"data": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            origin = self.headers.get("Origin")
+            if origin:  # VULN: reflects any Origin and allows credentials
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Credentials", "true")
+            self.end_headers()
+            return self.wfile.write(body)
+
+        if path == "/api/safe-data":
+            body = json.dumps({"data": "ok"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            # SAFE: a single fixed allowlisted origin, never the caller's Origin
+            self.send_header("Access-Control-Allow-Origin", "https://app.example")
+            self.end_headers()
+            return self.wfile.write(body)
 
         if path == "/me":
             if not who:

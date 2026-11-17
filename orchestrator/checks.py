@@ -405,3 +405,33 @@ def check_ssrf(session, hyp, ev_dir, ctx):
                            false_positive_reason="internal/link-local address blocked while "
                                                  "an external URL is allowed")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CORS")
+def check_cors(session, hyp, ev_dir, ctx):
+    """CORS misconfiguration: the endpoint reflects an arbitrary Origin into
+    Access-Control-Allow-Origin, letting any site read the response. Worst with
+    Access-Control-Allow-Credentials: true, which exposes authenticated data."""
+    endpoint = hyp["endpoint"]
+    marker = "https://evil-" + secrets.token_hex(3) + ".example"
+    resp = session.get(endpoint, headers={"Origin": marker})
+    files = save_evidence(ev_dir, "cors-probe", resp)
+    acao = next((v for k, v in resp.headers.items()
+                 if k.lower() == "access-control-allow-origin"), "")
+    acac = next((v for k, v in resp.headers.items()
+                 if k.lower() == "access-control-allow-credentials"), "").lower()
+
+    if acao == marker or (acao == "*" and acac == "true"):
+        with_creds = acac == "true"
+        detail = ("reflected the attacker Origin" if acao == marker
+                  else "served a wildcard origin")
+        return CheckResult(
+            "confirmed", endpoint, "high" if with_creds else "medium", f"Origin: {marker}",
+            f"Access-Control-Allow-Origin {detail}" +
+            (" with Access-Control-Allow-Credentials: true (authenticated cross-origin "
+             "reads)." if with_creds else " (cross-origin reads allowed)."), files=files)
+    if acao:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason=f"Access-Control-Allow-Origin is fixed "
+                                                 f"({acao}), not reflected")
+    return CheckResult("unconfirmed", endpoint, files=files)
