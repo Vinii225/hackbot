@@ -7,8 +7,8 @@ import zipfile
 from collections import Counter
 from xml.sax.saxutils import escape
 
-from .catalog import meta_for
-from .report import _SEVERITY_ORDER, _severity
+from .catalog import CLASS_META, meta_for
+from .report import _SEVERITY_ORDER, _severity, coverage, scope_summary
 
 _SEVERITIES = ("critical", "high", "medium", "low")
 _SEV_COLOR = {"critical": "#7b1fa2", "high": "#d32f2f", "medium": "#f57c00",
@@ -25,6 +25,7 @@ def _model(store):
         "target": store.dir.name,
         "mode": store.state.get("mode"),
         "objective": store.state.get("objective"),
+        "scope": scope_summary(store),
         "summary": {
             "confirmed": by_status.get("confirmed", 0),
             "unconfirmed": by_status.get("unconfirmed", 0),
@@ -32,7 +33,17 @@ def _model(store):
             "by_severity": {s: by_sev[s] for s in _SEVERITIES if by_sev.get(s)},
         },
         "findings": [_finding_view(f) for f in confirmed],
+        "coverage": _coverage_view(findings),
+        "not_reached": [k for k in sorted(CLASS_META) if k not in coverage(findings)],
     }
+
+
+def _coverage_view(findings):
+    cov = coverage(findings)
+    return [{"class": cls, "checked": sum(cov[cls].values()),
+             "confirmed": cov[cls]["confirmed"],
+             "false_positive": cov[cls]["false-positive"],
+             "unconfirmed": cov[cls]["unconfirmed"]} for cls in sorted(cov)]
 
 
 def _finding_view(f):
@@ -63,6 +74,11 @@ def write_html(store):
         f'&mdash; <code>{escape(str(x["endpoint"]))}</code></li>'
         for x in m["findings"]) or "<li>No confirmed findings.</li>"
     cards = "".join(_html_card(x) for x in m["findings"])
+    cov_rows = "".join(
+        f'<li><b>{escape(str(c["class"]))}</b> &mdash; {c["checked"]} checked '
+        f'(confirmed {c["confirmed"]}, false-positive {c["false_positive"]}, '
+        f'unconfirmed {c["unconfirmed"]})</li>' for c in m["coverage"]) or "<li>None.</li>"
+    nr = escape(", ".join(m["not_reached"])) or "none"
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Security Assessment - {escape(str(m['target']))}</title>
 <style>body{{font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:820px;margin:40px auto;
@@ -73,6 +89,7 @@ padding:4px 16px;margin:12px 0}}code{{background:#f4f4f4;padding:1px 4px;border-
 ul{{padding-left:18px}}.meta{{color:#555;font-size:13px}}</style></head><body>
 <h1>Security Assessment Report &mdash; {escape(str(m['target']))}</h1>
 <p class="meta">Mode: {escape(str(m['mode']))} &middot; Objective: {escape(str(m['objective']))}</p>
+<p class="meta">Authorized scope: {escape(str(m['scope']))}</p>
 <h2>Executive Summary</h2>
 <p>Confirmed: <b>{m['summary']['confirmed']}</b> &middot; Unconfirmed: {m['summary']['unconfirmed']}
 &middot; False positives: {m['summary']['false_positive']}</p>
@@ -80,6 +97,9 @@ ul{{padding-left:18px}}.meta{{color:#555;font-size:13px}}</style></head><body>
 <ul>{rows}</ul>
 <h2>Findings</h2>
 {cards or '<p>No confirmed findings.</p>'}
+<h2>Coverage</h2>
+<ul>{cov_rows}</ul>
+<p class="meta">Not reached (no matching surface): {nr}</p>
 </body></html>"""
     return _write(store, "report.html", html)
 
@@ -127,6 +147,7 @@ def write_docx(store):
     m = _model(store)
     body = [_para(f"Security Assessment Report - {m['target']}", bold=True, size=36),
             _para(f"Mode: {m['mode']}  |  Objective: {m['objective']}"),
+            _para(f"Authorized scope: {m['scope']}"),
             _para("Executive Summary", bold=True, size=28),
             _para(f"Confirmed: {m['summary']['confirmed']}  |  Unconfirmed: "
                   f"{m['summary']['unconfirmed']}  |  False positives: "
@@ -146,6 +167,12 @@ def write_docx(store):
             _para(f"Remediation: {x.get('remediation') or 'n/a'}"),
             _para(f"Evidence: {ev.get('dir')} ({', '.join(ev.get('files', [])) or 'none'})"),
         ]
+    body.append(_para("Coverage", bold=True, size=28))
+    for c in m["coverage"]:
+        body.append(_para(f"{c['class']}: {c['checked']} checked (confirmed {c['confirmed']}, "
+                          f"false-positive {c['false_positive']}, unconfirmed "
+                          f"{c['unconfirmed']})"))
+    body.append(_para("Not reached: " + (", ".join(m["not_reached"]) or "none")))
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/'
                 '2006/main"><w:body>' + "".join(body) + "<w:sectPr/></w:body></w:document>")

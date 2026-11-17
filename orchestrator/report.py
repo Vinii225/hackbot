@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from collections import Counter
 
-from .catalog import meta_for
+from .catalog import CLASS_META, meta_for
+from .core import load_scope
 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, None: 5}
 _SEVERITIES = ("critical", "high", "medium", "low")
@@ -12,6 +13,45 @@ _SEVERITIES = ("critical", "high", "medium", "low")
 def _severity(f) -> str:
     meta = meta_for(f.get("class")) or {}
     return (f.get("severity") or meta.get("severity") or "info").lower()
+
+
+def scope_summary(store) -> str:
+    """The authorized in-scope hosts, echoed into the report so the engagement's boundary is
+    on the record. Returns 'n/a' when scope is missing or still a placeholder."""
+    try:
+        ok, _reason, urls = load_scope(store.dir)
+    except Exception:
+        return "n/a"
+    return ", ".join(dict.fromkeys(urls)) if ok and urls else "n/a"
+
+
+def coverage(findings) -> dict:
+    """Per-class outcome counts across every finding (confirmed, false-positive, unconfirmed),
+    so the report shows what was exercised even where nothing was found."""
+    by_class: dict[str, Counter] = {}
+    for f in findings:
+        cls = f.get("class") or "UNKNOWN"
+        by_class.setdefault(cls, Counter())[f.get("status") or "unknown"] += 1
+    return by_class
+
+
+def _coverage_lines(findings) -> list:
+    by_class = coverage(findings)
+    lines = ["", "## Coverage", ""]
+    if by_class:
+        lines.append("Vulnerability classes exercised (a checker ran against a discovered "
+                     "surface):")
+        for cls in sorted(by_class):
+            c = by_class[cls]
+            lines.append(f"- {cls}: {sum(c.values())} checked (confirmed {c['confirmed']}, "
+                         f"false-positive {c['false-positive']}, unconfirmed {c['unconfirmed']})")
+    else:
+        lines.append("No vulnerability classes were exercised.")
+    not_reached = [k for k in sorted(CLASS_META) if k not in by_class]
+    if not_reached:
+        lines += ["", "Not reached (no matching attack surface discovered): "
+                  + ", ".join(not_reached)]
+    return lines
 
 
 def write_report(store) -> dict:
@@ -28,7 +68,8 @@ def write_report(store) -> dict:
         f"# Security Assessment Report - {store.dir.name}", "",
         f"- Target: {store.dir.name}",
         f"- Mode: {store.state.get('mode')}",
-        f"- Objective: {store.state.get('objective')}", "",
+        f"- Objective: {store.state.get('objective')}",
+        f"- Authorized scope: {scope_summary(store)}", "",
         "## Executive Summary", "",
         f"- Confirmed: {by_status.get('confirmed', 0)} | "
         f"Unconfirmed: {by_status.get('unconfirmed', 0)} | "
@@ -59,6 +100,8 @@ def write_report(store) -> dict:
         ]
         if f.get("explanation"):
             lines.append(f"- Impact & remediation: {f['explanation']}")
+
+    lines += _coverage_lines(findings)
 
     report_file = store.dir / "reports" / "REPORT.md"
     report_file.parent.mkdir(parents=True, exist_ok=True)
