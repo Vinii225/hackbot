@@ -49,6 +49,15 @@ CLASS_META = {
     "PROTO-POLLUTION": {"title": "Prototype Pollution", "cwe": "CWE-1321",
                         "owasp": "A08:2021 Software and Data Integrity Failures",
                         "severity": "high"},
+    "NOSQLI": {"title": "NoSQL Injection", "cwe": "CWE-943",
+               "owasp": "A03:2021 Injection", "severity": "high"},
+    "XPATHI": {"title": "XPath Injection", "cwe": "CWE-91",
+               "owasp": "A03:2021 Injection", "severity": "high"},
+    "INSECURE-COOKIE": {"title": "Insecure Cookie (missing HttpOnly/Secure)", "cwe": "CWE-1004",
+                        "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "DEFAULT-CREDS": {"title": "Default Credentials", "cwe": "CWE-1392",
+                      "owasp": "A07:2021 Identification and Authentication Failures",
+                      "severity": "high"},
 }
 
 # Concise, class-level remediation guidance surfaced in every report next to the finding.
@@ -97,6 +106,14 @@ REMEDIATION = {
                  "login, signup and password reset.",
     "PROTO-POLLUTION": "Reject or strip __proto__/constructor/prototype keys before merging "
                        "untrusted JSON; use Map or null-prototype objects and safe-merge.",
+    "NOSQLI": "Never pass raw request objects into queries; coerce values to the expected "
+              "type and reject query operators ($ne, $gt) in user input.",
+    "XPATHI": "Use parameterized XPath / variable binding; escape or reject quotes and XPath "
+              "metacharacters in user input.",
+    "INSECURE-COOKIE": "Set session cookies with HttpOnly, Secure and SameSite; scope Path "
+                       "and Domain tightly.",
+    "DEFAULT-CREDS": "Remove or force-rotate default/vendor credentials on first use; enforce "
+                     "a strong password policy and lockout.",
 }
 for _cls, _fix in REMEDIATION.items():
     CLASS_META[_cls]["remediation"] = _fix
@@ -107,7 +124,10 @@ _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
             "DIR_LISTING": "DIR-LISTING", "DIRECTORY-LISTING": "DIR-LISTING",
             "LDAP": "LDAPI", "LDAP-INJECTION": "LDAPI", "MASS_ASSIGNMENT": "MASS-ASSIGNMENT",
             "USER_ENUM": "USER-ENUM", "PROTOTYPE-POLLUTION": "PROTO-POLLUTION",
-            "PROTO_POLLUTION": "PROTO-POLLUTION"}
+            "PROTO_POLLUTION": "PROTO-POLLUTION",
+            "NOSQL": "NOSQLI", "NOSQL-INJECTION": "NOSQLI", "XPATH": "XPATHI",
+            "XPATH-INJECTION": "XPATHI", "INSECURE_COOKIE": "INSECURE-COOKIE",
+            "DEFAULT_CREDS": "DEFAULT-CREDS"}
 
 
 def meta_for(cls):

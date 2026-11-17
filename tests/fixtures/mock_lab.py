@@ -48,6 +48,14 @@ Scenarios:
   POST /safe-login-verbose      uniform invalid-credentials reply                    (SAFE)
   POST /merge                   prototype pollution: honors __proto__ in merge        (VULN)
   POST /safe-merge              strips __proto__/constructor keys                     (SAFE)
+  POST /nosql-login             NoSQL injection: a $ne operator bypasses auth         (VULN)
+  POST /safe-nosql-login        password coerced to a string literal                 (SAFE)
+  GET  /xpath-search?xp=        XPath injection: quote breakout returns all records   (VULN)
+  GET  /safe-xpath-search?xp=   XPath quotes stripped                                 (SAFE)
+  GET  /weak-cookie             insecure cookie: Set-Cookie without HttpOnly/Secure   (VULN)
+  GET  /strong-cookie           cookie with HttpOnly; Secure; SameSite                (SAFE)
+  POST /admin-login             default credentials: admin:admin accepted            (VULN)
+  POST /safe-admin-login        default pair rejected                                (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -98,6 +106,10 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/files/">Files</a>
 <a href="/ldap-login?login=admin">LDAP login</a>
 <a href="/merge">Merge config</a>
+<a href="/nosql-login">NoSQL login</a>
+<a href="/xpath-search?xp=test">XPath search</a>
+<a href="/weak-cookie">Session cookie</a>
+<form action="/admin-login" method="POST"><input name="username"><input name="password"><button>Sign in</button></form>
 <form action="/update-profile" method="POST"><input name="name"><button>Update</button></form>
 <form action="/login-verbose" method="POST"><input name="username"><input name="password"><button>Go</button></form>
 <a href="/filter?category=Gifts">Filter</a>
@@ -202,6 +214,16 @@ def _fake_ldap(value: str, escape: bool):
         value = re.sub(r"[*()|&]", "", value)
     if not escape and (")(" in value or "*" in value):
         return list(USERS)                       # injection -> all records
+    return [value] if value in USERS else []
+
+
+def _fake_xpath(value: str, escape: bool):
+    """Emulate `//user[name='<value>']`. An unescaped quote breakout (' or '...) closes the
+    predicate and matches every node; stripping quotes neutralizes it. No real XPath engine."""
+    if escape:
+        value = value.replace("'", "")
+    if not escape and re.search(r"'\s*or\s*'", value, re.I):
+        return list(USERS)
     return [value] if value in USERS else []
 
 
@@ -326,6 +348,20 @@ class _Handler(BaseHTTPRequestHandler):
             merged = _merge({}, payload, safe=self.path == "/safe-merge")
             proto = merged.get("__proto__") if isinstance(merged.get("__proto__"), dict) else {}
             return self._send(200, {"merged": True, "polluted": proto.get("hbflag")})
+        if self.path in ("/nosql-login", "/safe-nosql-login"):
+            try:
+                creds = json.loads(raw)
+            except json.JSONDecodeError:
+                creds = {}
+            pw = creds.get("password")
+            if self.path == "/safe-nosql-login" and not isinstance(pw, str):
+                pw = json.dumps(pw)                       # SAFE: coerce operator to a literal
+            if isinstance(pw, dict):                      # VULN: operator object bypasses auth
+                return self._send(200, {"login": "ok", "user": creds.get("user", "")})
+            u = USERS.get(creds.get("user", ""))
+            if u and u["password"] == pw:
+                return self._send(200, {"login": "ok", "user": creds.get("user", "")})
+            return self._send(401, {"error": "invalid credentials"})
         if self.path in ("/graphql", "/safe-graphql"):
             try:
                 query = json.loads(raw).get("query", "")
@@ -366,6 +402,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/change-email":
             # VULN: no anti-CSRF token required for a state-changing request.
             return self._send(200, {"changed": form.get("email", "")})
+        if self.path in ("/admin-login", "/safe-admin-login"):
+            user, pw = form.get("username", ""), form.get("password", "")
+            if self.path == "/admin-login" and user == "admin" and pw == "admin":
+                return self._send(200, {"login": "ok"})   # VULN: vendor default accepted
+            if self.path == "/safe-admin-login" and user == "operator" and pw == "S3cure!pw":
+                return self._send(200, {"login": "ok"})
+            return self._send(401, {"error": "invalid credentials"})
         if self.path == "/safe-change-email":
             if not form.get("csrf"):
                 return self._send(403, {"error": "csrf token required"})  # SAFE
@@ -490,6 +533,20 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ("/safe-files", "/safe-files/"):
             return self._send(403, {"error": "forbidden"})  # SAFE: no listing
 
+        if path in ("/xpath-search", "/safe-xpath-search"):
+            found = _fake_xpath(self._query().get("xp", ""), escape=path == "/safe-xpath-search")
+            return self._send(200, {"results": found})
+        if path in ("/weak-cookie", "/strong-cookie"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            if path == "/weak-cookie":
+                self.send_header("Set-Cookie", "sid=abc123; Path=/")            # VULN: no flags
+            else:
+                self.send_header("Set-Cookie",
+                                 "sid=abc123; Path=/; HttpOnly; Secure; SameSite=Strict")
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+            return
         if path in ("/ldap-login", "/safe-ldap-login"):
             value = self._query().get("login", "")
             found = _fake_ldap(value, escape=path == "/safe-ldap-login")

@@ -33,7 +33,11 @@
     "ldapi",
     "mass-assignment",
     "user-enum",
-    "proto-pollution"
+    "proto-pollution",
+    "nosqli",
+    "xpathi",
+    "insecure-cookie",
+    "default-creds"
   ],
   "allowed_tools": [
     "curl",
@@ -62,6 +66,10 @@
     "ldapi",
     "mass-assignment",
     "user-enum",
-    "proto-pollution"
+    "proto-pollution",
+    "nosqli",
+    "xpathi",
+    "insecure-cookie",
+    "default-creds"
   ]
 }

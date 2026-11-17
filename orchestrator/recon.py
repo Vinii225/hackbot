@@ -39,6 +39,10 @@ LDAP_PATH_HINTS = ("ldap", "directory-login", "ad-login")
 MASS_ASSIGN_PATH_HINTS = ("update", "profile", "account", "register", "signup", "user")
 USER_ENUM_PATH_HINTS = ("login", "signin", "sign-in", "authenticate", "forgot", "reset")
 PROTO_POLLUTION_PATH_HINTS = ("merge", "config", "settings", "preferences", "patch")
+NOSQL_PATH_HINTS = ("nosql", "mongo")
+XPATH_PATH_HINTS = ("xpath", "xquery", "xml-search")
+COOKIE_PATH_HINTS = ("cookie", "session-cookie")
+DEFAULT_CREDS_PATH_HINTS = ("admin-login", "admin-signin", "default-login")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -312,6 +316,49 @@ def make_hypotheses(crawl) -> list:
             hyps.append({"endpoint": path, "method": "POST", "parameter": None,
                          "class": "PROTO-POLLUTION", "confidence": "low",
                          "reason": f"{path} merges client JSON; test __proto__ pollution.",
+                         "status": "open"})
+
+    # NOSQLI: JSON login/query endpoints that may accept query operators.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in NOSQL_PATH_HINTS) and ("NOSQLI", path) not in seen:
+            seen.add(("NOSQLI", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "NOSQLI", "confidence": "medium",
+                         "reason": f"{path} looks NoSQL-backed; test operator injection.",
+                         "status": "open"})
+
+    # XPATHI: search endpoints backed by an XPath query.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in XPATH_PATH_HINTS) and ("XPATHI", path) not in seen:
+            seen.add(("XPATHI", path))
+            hyps.append({"endpoint": path, "method": ep["method"],
+                         "parameter": (ep["params"][0] if ep["params"] else "xp"),
+                         "class": "XPATHI", "confidence": "medium",
+                         "reason": f"{path} looks XPath-backed; test quote breakout.",
+                         "status": "open"})
+
+    # INSECURE-COOKIE: endpoints that set a session cookie.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in COOKIE_PATH_HINTS) \
+                and ("INSECURE-COOKIE", path) not in seen:
+            seen.add(("INSECURE-COOKIE", path))
+            hyps.append({"endpoint": path, "method": "GET", "parameter": None,
+                         "class": "INSECURE-COOKIE", "confidence": "low",
+                         "reason": f"{path} sets a cookie; test for HttpOnly/Secure flags.",
+                         "status": "open"})
+
+    # DEFAULT-CREDS: admin login endpoints that may accept vendor defaults.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in DEFAULT_CREDS_PATH_HINTS) \
+                and ("DEFAULT-CREDS", path) not in seen:
+            seen.add(("DEFAULT-CREDS", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "DEFAULT-CREDS", "confidence": "low",
+                         "reason": f"{path} is an admin login; test default credentials.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
