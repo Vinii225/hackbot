@@ -145,6 +145,17 @@ def make_hypotheses(crawl) -> list:
                                        "fetch a URL it controls.",
                              "status": "open"})
 
+    # CORS: API-ish endpoints whose cross-origin policy is worth probing.
+    for ep in endpoints:
+        path = ep["path"]
+        if "api" in path.lower() and ("CORS", path) not in seen:
+            seen.add(("CORS", path))
+            hyps.append({"endpoint": path, "method": ep["method"], "parameter": None,
+                         "class": "CORS", "confidence": "low",
+                         "reason": f"{path} looks like an API endpoint; probe its "
+                                   "cross-origin resource sharing policy.",
+                         "status": "open"})
+
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)
     # that should test anonymous access.
     hidden = getattr(crawl, "hidden_paths", set())

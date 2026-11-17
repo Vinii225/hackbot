@@ -18,6 +18,7 @@ you are explicitly authorized to test.
 - **Server-Side Template Injection** — `agents/vuln-hunter/skills/ssti/ssti.md`
 - **Open Redirect** — `agents/vuln-hunter/skills/open-redirect/open-redirect.md`
 - **Server-Side Request Forgery (SSRF)** — `agents/vuln-hunter/skills/ssrf/ssrf.md`
+- **CORS Misconfiguration** — `agents/vuln-hunter/skills/cors/cors.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -173,5 +174,5 @@ to the target.
 
 ## Roadmap (future skills, not in MVP)
 
-JWT · CORS · GraphQL · XXE · CSRF — each added as a new
+JWT · GraphQL · XXE · CSRF — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.

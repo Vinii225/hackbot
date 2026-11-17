@@ -20,7 +20,8 @@
     "sqli",
     "ssti",
     "open-redirect",
-    "ssrf"
+    "ssrf",
+    "cors"
   ],
   "allowed_tools": [
     "curl",
@@ -36,6 +37,7 @@
     "sqli",
     "ssti",
     "open-redirect",
-    "ssrf"
+    "ssrf",
+    "cors"
   ]
 }
