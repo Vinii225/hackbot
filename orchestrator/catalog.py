@@ -15,6 +15,8 @@ CLASS_META = {
                        "owasp": "A01:2021 Broken Access Control", "severity": "high"},
     "SQLI": {"title": "SQL Injection", "cwe": "CWE-89",
              "owasp": "A03:2021 Injection", "severity": "high"},
+    "SSTI": {"title": "Server-Side Template Injection", "cwe": "CWE-1336",
+             "owasp": "A03:2021 Injection", "severity": "high"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

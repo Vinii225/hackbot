@@ -15,6 +15,7 @@ you are explicitly authorized to test.
 - **Reflected XSS** — `agents/vuln-hunter/skills/xss/xss.md`
 - **Broken Access Control** (unauthenticated privileged access) — `agents/vuln-hunter/skills/access-control/access-control.md`
 - **SQL Injection** (error / boolean / time-based) — `agents/vuln-hunter/skills/sqli/sqli.md`
+- **Server-Side Template Injection** — `agents/vuln-hunter/skills/ssti/ssti.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -170,5 +171,5 @@ to the target.
 
 ## Roadmap (future skills, not in MVP)
 
-SSRF · JWT · CORS · SSTI · GraphQL · XXE · CSRF — each added as a new
+SSRF · JWT · CORS · GraphQL · XXE · CSRF — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.
