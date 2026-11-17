@@ -720,3 +720,186 @@ def check_proto_pollution(session, hyp, ev_dir, ctx):
                            false_positive_reason="__proto__ key did not pollute the object "
                                                  "(stripped or ignored)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("NOSQLI", "NOSQL", "NOSQL-INJECTION")
+def check_nosqli(session, hyp, ev_dir, ctx):
+    """NoSQL injection: a JSON login/query endpoint accepts a query operator object ($ne)
+    in place of a string value, bypassing authentication."""
+    endpoint = hyp["endpoint"]
+    pw = "wrong-" + secrets.token_hex(3)
+    control = session.post(endpoint, json_body={"user": ctx.actor, "password": pw})
+    inject = session.post(endpoint, json_body={"user": ctx.actor, "password": {"$ne": pw}})
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-operator", inject)
+
+    if inject.status == 200 and control.status != 200:
+        return CheckResult("confirmed", endpoint, "high", '{"password":{"$ne":"..."}}',
+                           "A query operator ($ne) in the JSON body bypassed authentication "
+                           "where a normal wrong password failed (NoSQL injection).",
+                           files=files)
+    if inject.status == control.status:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="operator object treated as a literal value "
+                                                 "(no bypass)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("XPATHI", "XPATH", "XPATH-INJECTION")
+def check_xpathi(session, hyp, ev_dir, ctx):
+    """XPath injection: a search backed by an XPath query lets a quote breakout alter the
+    query logic and return records it should not."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "xp"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    control = send("nobody-" + secrets.token_hex(3))
+    inject = send("' or '1'='1")
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-xpath", inject)
+    cbody, ibody = control.body or "", inject.body or ""
+
+    if inject.status == 200 and len(ibody) > len(cbody) + 2:
+        return CheckResult("confirmed", endpoint, "high", "' or '1'='1",
+                           "A quote breakout returned more records than a benign query "
+                           "(XPath injection).", files=files)
+    if len(ibody) <= len(cbody):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="quote neutralized; injection returned no "
+                                                 "extra records")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("INSECURE-COOKIE", "INSECURE_COOKIE")
+def check_insecure_cookie(session, hyp, ev_dir, ctx):
+    """Insecure cookie: a session cookie is set without the HttpOnly/Secure flags, exposing
+    it to theft via script or plaintext transport."""
+    endpoint = hyp["endpoint"]
+    resp = session.get(endpoint)
+    files = save_evidence(ev_dir, "set-cookie", resp)
+    setc = next((v for k, v in resp.headers.items() if k.lower() == "set-cookie"), "")
+    if not setc:
+        return CheckResult("unconfirmed", endpoint, files=files)
+    missing = [flag for flag in ("httponly", "secure") if flag not in setc.lower()]
+    if missing:
+        return CheckResult("confirmed", endpoint, "low", setc.split(";")[0],
+                           "Session cookie set without " + " and ".join(missing)
+                           + " (insecure cookie).", files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="cookie carries HttpOnly and Secure flags")
+
+
+_DEFAULT_CREDS = (("admin", "admin"), ("admin", "password"), ("administrator", "admin"),
+                  ("root", "root"), ("admin", "123456"))
+
+
+@register("DEFAULT-CREDS", "DEFAULT_CREDS", "DEFAULT-CREDENTIALS")
+def check_default_creds(session, hyp, ev_dir, ctx):
+    """Default credentials: an admin login accepts a common vendor-default pair."""
+    endpoint = hyp["endpoint"]
+    files = []
+    for user, pw in _DEFAULT_CREDS:
+        resp = session.post(endpoint, data={"username": user, "password": pw})
+        files += save_evidence(ev_dir, f"try-{user}-{pw}", resp)
+        if resp.status == 200 and "ok" in (resp.body or "").lower():
+            return CheckResult("confirmed", endpoint, "high", f"{user}:{pw}",
+                               f"Admin login accepted default credentials {user}:{pw}.",
+                               files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="no default credential pair was accepted")
+
+
+@register("SSI", "SERVER-SIDE-INCLUDES")
+def check_ssi(session, hyp, ev_dir, ctx):
+    """Server-Side Includes injection: an SSI directive in user input is executed by the
+    server rather than treated as text."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "block"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    marker = "hb" + secrets.token_hex(3)
+    resp = send(f'<!--#exec cmd="echo {marker}"-->')
+    files = save_evidence(ev_dir, "inject-ssi", resp)
+    body = resp.body or ""
+
+    if marker in body and "exec" not in body.lower():
+        return CheckResult("confirmed", endpoint, "high", '<!--#exec cmd="echo ..."-->',
+                           "An SSI directive in the input was executed: its output appeared "
+                           "and the directive was consumed (server-side includes injection).",
+                           files=files)
+    if marker in body:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="directive reflected as inert text "
+                                                 "(escaped, not executed)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("DESERIAL", "INSECURE-DESERIALIZATION", "DESERIALIZATION")
+def check_deserial(session, hyp, ev_dir, ctx):
+    """Insecure deserialization: a serialized object from the client is trusted, so a forged
+    type field escalates privileges."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "data"
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+
+    def blob(cls):
+        return base64.b64encode(
+            json.dumps({"__class__": cls, "user": ctx.actor}).encode()).decode()
+
+    def is_admin(resp):
+        try:
+            return bool(resp.json().get("admin"))
+        except Exception:
+            return False
+
+    control = send(blob("UserSession"))
+    inject = send(blob("AdminSession"))
+    files = save_evidence(ev_dir, "control", control)
+    files += save_evidence(ev_dir, "inject-object", inject)
+
+    if is_admin(inject) and not is_admin(control):
+        return CheckResult("confirmed", endpoint, "high", '{"__class__":"AdminSession"}',
+                           "A forged object type in the serialized blob was trusted and "
+                           "granted admin (insecure deserialization).", files=files)
+    if is_admin(inject) == is_admin(control):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="serialized type field ignored "
+                                                 "(authority resolved server-side)")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("VERB-TAMPER", "VERB-TAMPERING", "HTTP-VERB-TAMPERING")
+def check_verb_tamper(session, hyp, ev_dir, ctx):
+    """HTTP verb tampering: an access control enforced on GET is skipped for another method."""
+    endpoint = hyp["endpoint"]
+    get = session.get(endpoint)
+    post = session.post(endpoint, data={})
+    files = save_evidence(ev_dir, "get", get)
+    files += save_evidence(ev_dir, "post", post)
+
+    if get.status in (401, 403) and post.status == 200:
+        return CheckResult("confirmed", endpoint, "high", "POST (control enforced only on GET)",
+                           "GET is denied (401/403) but POST to the same path returns 200, so "
+                           "authorization is scoped to one verb (verb tampering).", files=files)
+    if get.status == post.status:
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="same authorization result across methods")
+    return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("CRLF", "CRLF-INJECTION", "RESPONSE-SPLITTING", "HTTP-RESPONSE-SPLITTING")
+def check_crlf(session, hyp, ev_dir, ctx):
+    """CRLF injection / response splitting: a value reflected into a response header is not
+    stripped of CR/LF, letting an attacker inject a header."""
+    endpoint = hyp["endpoint"]
+    param = hyp.get("parameter") or "lang"
+    marker = "hb" + secrets.token_hex(3)
+    send = _query_sender(session, endpoint, param, hyp.get("method", "GET"))
+    resp = send(f"en\r\nX-Hbcrlf: {marker}")
+    files = save_evidence(ev_dir, "inject-crlf", resp)
+    injected = next((v for k, v in resp.headers.items() if k.lower() == "x-hbcrlf"), "")
+
+    if marker in injected:
+        return CheckResult("confirmed", endpoint, "medium", "en\\r\\nX-Hbcrlf: <marker>",
+                           "A CRLF sequence in the value created a new response header "
+                           "(HTTP response splitting).", files=files)
+    return CheckResult("false-positive", endpoint, files=files,
+                       false_positive_reason="CR/LF stripped; no header injected")
