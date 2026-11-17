@@ -32,6 +32,8 @@ Scenarios:
   POST /safe-change-email       requires a valid csrf token                          (SAFE)
   GET  /panel                   clickjacking: HTML with no X-Frame-Options           (VULN)
   GET  /safe-panel              sets X-Frame-Options: DENY                           (SAFE)
+  POST /graphql                 GraphQL introspection enabled (schema disclosed)     (VULN)
+  POST /safe-graphql            introspection disabled                               (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -75,6 +77,7 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/reset-link">Reset password</a>
 <form action="/change-email" method="POST"><input name="email"><button>Save</button></form>
 <a href="/panel">Panel</a>
+<a href="/graphql">GraphQL API</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -259,6 +262,18 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path in ("/import", "/safe-import"):
             expanded = _xml_expand(raw, resolve_entities=self.path == "/import")
             return self._send_raw(200, expanded, "application/xml")
+        if self.path in ("/graphql", "/safe-graphql"):
+            try:
+                query = json.loads(raw).get("query", "")
+            except json.JSONDecodeError:
+                query = ""
+            if "__schema" in query:
+                if self.path == "/graphql":  # VULN: introspection exposed
+                    return self._send(200, {"data": {"__schema": {
+                        "queryType": {"name": "Query"},
+                        "types": [{"name": "User"}, {"name": "Query"}]}}})
+                return self._send(400, {"errors": [{"message": "introspection is disabled"}]})
+            return self._send(200, {"data": {}})
         form = {k: v[0] for k, v in urllib.parse.parse_qs(raw).items()}
         if self.path == "/login":
             u = USERS.get(form.get("username", ""))

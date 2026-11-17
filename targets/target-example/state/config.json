@@ -25,7 +25,8 @@
     "xxe",
     "host-header",
     "csrf",
-    "clickjacking"
+    "clickjacking",
+    "graphql"
   ],
   "allowed_tools": [
     "curl",
@@ -46,6 +47,7 @@
     "xxe",
     "host-header",
     "csrf",
-    "clickjacking"
+    "clickjacking",
+    "graphql"
   ]
 }

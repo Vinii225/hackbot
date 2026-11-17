@@ -29,6 +29,7 @@ HOST_HEADER_PATH_HINTS = ("reset", "forgot", "password", "verify", "confirm", "i
 CSRF_PATH_HINTS = ("change", "update", "edit", "delete", "remove", "add", "create",
                    "transfer", "settings", "profile", "subscribe")
 CLICKJACKING_PATH_HINTS = ("panel", "dashboard", "account", "settings", "profile")
+GRAPHQL_PATH_HINTS = ("graphql", "graphiql", "gql", "graph")
 _SEG_DIGITS = re.compile(r"^\d+$")
 
 
@@ -210,6 +211,17 @@ def make_hypotheses(crawl) -> list:
                          "class": "CLICKJACKING", "confidence": "low",
                          "reason": f"{path} is a sensitive page; test whether it can be "
                                    "framed (missing X-Frame-Options / CSP frame-ancestors).",
+                         "status": "open"})
+
+    # GRAPHQL: endpoints that look like a GraphQL API; test introspection.
+    for ep in endpoints:
+        path = ep["path"]
+        if any(k in path.lower() for k in GRAPHQL_PATH_HINTS) and ("GRAPHQL", path) not in seen:
+            seen.add(("GRAPHQL", path))
+            hyps.append({"endpoint": path, "method": "POST", "parameter": None,
+                         "class": "GRAPHQL", "confidence": "low",
+                         "reason": f"{path} looks like a GraphQL endpoint; test whether "
+                                   "schema introspection is exposed.",
                          "status": "open"})
 
     # ACCESS-CONTROL: privileged-looking paths (admin-like, or disclosed by robots.txt)

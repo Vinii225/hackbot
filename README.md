@@ -23,6 +23,7 @@ you are explicitly authorized to test.
 - **Host Header Injection** — `agents/vuln-hunter/skills/host-header/host-header.md`
 - **Cross-Site Request Forgery (CSRF)** — `agents/vuln-hunter/skills/csrf/csrf.md`
 - **Clickjacking (missing frame protection)** — `agents/vuln-hunter/skills/clickjacking/clickjacking.md`
+- **GraphQL Introspection** — `agents/vuln-hunter/skills/graphql/graphql.md`
 
 New vulnerability classes are added as new skills without redesigning the system.
 
@@ -178,5 +179,5 @@ to the target.
 
 ## Roadmap (future skills, not in MVP)
 
-JWT · GraphQL — each added as a new
+JWT — each added as a new
 `agents/vuln-hunter/skills/<class>/<class>.md` plus a Coordinator routing rule.

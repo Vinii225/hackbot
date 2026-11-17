@@ -31,6 +31,8 @@ CLASS_META = {
              "owasp": "A01:2021 Broken Access Control", "severity": "medium"},
     "CLICKJACKING": {"title": "Clickjacking (missing frame protection)", "cwe": "CWE-1021",
                      "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
+    "GRAPHQL": {"title": "GraphQL Introspection Exposed", "cwe": "CWE-200",
+                "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
 }
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",

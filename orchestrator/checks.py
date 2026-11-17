@@ -539,3 +539,22 @@ def check_clickjacking(session, hyp, ev_dir, ctx):
                            false_positive_reason="X-Frame-Options or CSP frame-ancestors is "
                                                  "set (framing denied)")
     return CheckResult("unconfirmed", endpoint, files=files)
+
+
+@register("GRAPHQL", "GRAPHQL-INTROSPECTION")
+def check_graphql(session, hyp, ev_dir, ctx):
+    """GraphQL introspection: the endpoint answers an introspection query, disclosing the
+    full schema (types, fields, mutations) to anyone — useful recon for an attacker."""
+    endpoint = hyp["endpoint"]
+    resp = session.post(endpoint, json_body={"query": "{__schema{queryType{name} types{name}}}"})
+    files = save_evidence(ev_dir, "introspection", resp)
+    body = resp.body or ""
+
+    if resp.status == 200 and "__schema" in body:
+        return CheckResult("confirmed", endpoint, "low", "{__schema{types{name}}}",
+                           "GraphQL introspection is enabled; the full schema is disclosed.",
+                           files=files)
+    if "introspection" in body.lower() or resp.status in (400, 403):
+        return CheckResult("false-positive", endpoint, files=files,
+                           false_positive_reason="introspection is disabled or rejected")
+    return CheckResult("unconfirmed", endpoint, files=files)
