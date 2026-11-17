@@ -27,7 +27,9 @@
     "csrf",
     "clickjacking",
     "graphql",
-    "jwt"
+    "jwt",
+    "info-disclosure",
+    "dir-listing"
   ],
   "allowed_tools": [
     "curl",
@@ -50,6 +52,8 @@
     "csrf",
     "clickjacking",
     "graphql",
-    "jwt"
+    "jwt",
+    "info-disclosure",
+    "dir-listing"
   ]
 }

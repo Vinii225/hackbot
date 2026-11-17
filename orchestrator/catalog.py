@@ -35,6 +35,10 @@ CLASS_META = {
                 "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
     "JWT": {"title": "JWT alg:none Signature Bypass", "cwe": "CWE-347",
             "owasp": "A07:2021 Identification and Authentication Failures", "severity": "high"},
+    "INFO-DISCLOSURE": {"title": "Verbose Error / Information Disclosure", "cwe": "CWE-209",
+                        "owasp": "A05:2021 Security Misconfiguration", "severity": "medium"},
+    "DIR-LISTING": {"title": "Directory Listing Enabled", "cwe": "CWE-548",
+                    "owasp": "A05:2021 Security Misconfiguration", "severity": "low"},
 }
 
 # Concise, class-level remediation guidance surfaced in every report next to the finding.
@@ -71,13 +75,18 @@ REMEDIATION = {
                "depth/complexity limits on the GraphQL endpoint.",
     "JWT": "Reject 'alg:none' and pin the expected algorithm; verify the signature with a "
            "strong secret/key; validate iss/aud/exp.",
+    "INFO-DISCLOSURE": "Return generic error pages; log details server-side only. Disable "
+                       "debug mode and stack traces in production.",
+    "DIR-LISTING": "Disable automatic directory indexing (e.g. Options -Indexes / autoindex "
+                   "off) and serve an explicit index or 403 for directories.",
 }
 for _cls, _fix in REMEDIATION.items():
     CLASS_META[_cls]["remediation"] = _fix
 
 _ALIASES = {"SQL-INJECTION": "SQLI", "PATH_TRAVERSAL": "PATH-TRAVERSAL",
             "ACCESS_CONTROL": "ACCESS-CONTROL", "OPEN_REDIRECT": "OPEN-REDIRECT",
-            "HOST_HEADER": "HOST-HEADER"}
+            "HOST_HEADER": "HOST-HEADER", "INFO_DISCLOSURE": "INFO-DISCLOSURE",
+            "DIR_LISTING": "DIR-LISTING", "DIRECTORY-LISTING": "DIR-LISTING"}
 
 
 def meta_for(cls):

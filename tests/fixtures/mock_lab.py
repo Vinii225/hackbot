@@ -36,6 +36,10 @@ Scenarios:
   POST /safe-graphql            introspection disabled                               (SAFE)
   GET  /api/jwt-whoami          JWT: accepts unsigned alg:none bearer tokens         (VULN)
   GET  /api/safe-jwt-whoami     rejects unsigned tokens                              (SAFE)
+  GET  /compute?n=              verbose error: stack trace on malformed input         (VULN)
+  GET  /safe-compute?n=         generic error on bad input                           (SAFE)
+  GET  /files/                  directory listing (auto index) exposed               (VULN)
+  GET  /safe-files/             directory access forbidden (403)                     (SAFE)
   GET  /robots.txt              discloses /admin-panel via Disallow            (info leak)
   GET  /sitemap.xml             lists /sitemap-only-page, linked nowhere else   (info leak)
   GET  /admin-panel             privileged panel reachable without auth               (VULN)
@@ -82,6 +86,8 @@ INDEX_HTML = """<!doctype html><html><body>
 <a href="/panel">Panel</a>
 <a href="/graphql">GraphQL API</a>
 <a href="/api/jwt-whoami">Who am I</a>
+<a href="/compute?n=5">Compute</a>
+<a href="/files/">Files</a>
 <a href="/filter?category=Gifts">Filter</a>
 <form action="/ping" method="GET"><input name="host"><button>Ping</button></form>
 <form action="/feedback" method="POST"><input name="message"><button>Send</button></form>
@@ -404,6 +410,28 @@ class _Handler(BaseHTTPRequestHandler):
                                             "role": payload.get("role")})
                 return self._send(401, {"error": "unsigned tokens rejected"})  # SAFE
             return self._send(401, {"error": "invalid token"})
+
+        if path in ("/compute", "/safe-compute"):
+            n = self._query().get("n", "")
+            try:
+                return self._send(200, {"result": int(n) * 2})
+            except ValueError:
+                if path == "/safe-compute":
+                    return self._send(400, {"error": "invalid input"})  # SAFE: generic
+                tb = ('Traceback (most recent call last):\n'
+                      '  File "/app/views.py", line 42, in compute\n'
+                      '    return int(n) * 2\n'
+                      f'ValueError: invalid literal for int() with base 10: {n!r}')
+                return self._send_raw(500, tb, "text/plain")  # VULN: stack trace leaked
+
+        if path in ("/files", "/files/"):
+            return self._send_raw(200, "<html><head><title>Index of /files</title></head>"
+                                       "<body><h1>Index of /files</h1><ul>"
+                                       '<li><a href="welcome.txt">welcome.txt</a></li>'
+                                       '<li><a href="backup.zip">backup.zip</a></li>'
+                                       "</ul></body></html>", "text/html")  # VULN
+        if path in ("/safe-files", "/safe-files/"):
+            return self._send(403, {"error": "forbidden"})  # SAFE: no listing
 
         if path == "/me":
             if not who:
