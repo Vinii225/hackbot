@@ -7,8 +7,8 @@ import zipfile
 from collections import Counter
 from xml.sax.saxutils import escape
 
-from .catalog import meta_for
-from .report import _SEVERITY_ORDER, _severity
+from .catalog import CLASS_META, meta_for
+from .report import _SEVERITY_ORDER, _severity, coverage
 
 _SEVERITIES = ("critical", "high", "medium", "low")
 _SEV_COLOR = {"critical": "#7b1fa2", "high": "#d32f2f", "medium": "#f57c00",
@@ -32,7 +32,17 @@ def _model(store):
             "by_severity": {s: by_sev[s] for s in _SEVERITIES if by_sev.get(s)},
         },
         "findings": [_finding_view(f) for f in confirmed],
+        "coverage": _coverage_view(findings),
+        "not_reached": [k for k in sorted(CLASS_META) if k not in coverage(findings)],
     }
+
+
+def _coverage_view(findings):
+    cov = coverage(findings)
+    return [{"class": cls, "checked": sum(cov[cls].values()),
+             "confirmed": cov[cls]["confirmed"],
+             "false_positive": cov[cls]["false-positive"],
+             "unconfirmed": cov[cls]["unconfirmed"]} for cls in sorted(cov)]
 
 
 def _finding_view(f):
@@ -63,6 +73,11 @@ def write_html(store):
         f'&mdash; <code>{escape(str(x["endpoint"]))}</code></li>'
         for x in m["findings"]) or "<li>No confirmed findings.</li>"
     cards = "".join(_html_card(x) for x in m["findings"])
+    cov_rows = "".join(
+        f'<li><b>{escape(str(c["class"]))}</b> &mdash; {c["checked"]} checked '
+        f'(confirmed {c["confirmed"]}, false-positive {c["false_positive"]}, '
+        f'unconfirmed {c["unconfirmed"]})</li>' for c in m["coverage"]) or "<li>None.</li>"
+    nr = escape(", ".join(m["not_reached"])) or "none"
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Security Assessment - {escape(str(m['target']))}</title>
 <style>body{{font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:820px;margin:40px auto;
@@ -80,6 +95,9 @@ ul{{padding-left:18px}}.meta{{color:#555;font-size:13px}}</style></head><body>
 <ul>{rows}</ul>
 <h2>Findings</h2>
 {cards or '<p>No confirmed findings.</p>'}
+<h2>Coverage</h2>
+<ul>{cov_rows}</ul>
+<p class="meta">Not reached (no matching surface): {nr}</p>
 </body></html>"""
     return _write(store, "report.html", html)
 
@@ -146,6 +164,12 @@ def write_docx(store):
             _para(f"Remediation: {x.get('remediation') or 'n/a'}"),
             _para(f"Evidence: {ev.get('dir')} ({', '.join(ev.get('files', [])) or 'none'})"),
         ]
+    body.append(_para("Coverage", bold=True, size=28))
+    for c in m["coverage"]:
+        body.append(_para(f"{c['class']}: {c['checked']} checked (confirmed {c['confirmed']}, "
+                          f"false-positive {c['false_positive']}, unconfirmed "
+                          f"{c['unconfirmed']})"))
+    body.append(_para("Not reached: " + (", ".join(m["not_reached"]) or "none")))
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/'
                 '2006/main"><w:body>' + "".join(body) + "<w:sectPr/></w:body></w:document>")
